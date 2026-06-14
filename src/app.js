@@ -36,6 +36,7 @@ const state = {
     laborEfficiency: 1,
     refundReduction: 0.7
   },
+  scenarioPreset: "custom",
   menuSort: "marginAsc",
   uploadRows: [],
   uploadKind: "orders",
@@ -202,7 +203,12 @@ function renderOverview() {
       <article class="panel span-5">
         <div class="panel-header">
           <div><h2>13-week rolling forecast</h2><p>actual, base forecast, and scenario</p></div>
-          <select class="mini-select" data-scenario-preset><option value="base">base</option><option value="direct">+direct mix</option><option value="cost">cost pressure</option></select>
+          <select class="mini-select" data-scenario-preset>
+            <option value="custom" ${state.scenarioPreset === "custom" ? "selected" : ""}>scenario</option>
+            <option value="base" ${state.scenarioPreset === "base" ? "selected" : ""}>base</option>
+            <option value="direct" ${state.scenarioPreset === "direct" ? "selected" : ""}>+direct mix</option>
+            <option value="cost" ${state.scenarioPreset === "cost" ? "selected" : ""}>cost pressure</option>
+          </select>
         </div>
         <div class="forecast-layout">
           <div id="forecast-chart" class="chart-host"></div>
@@ -431,7 +437,7 @@ function compactActionList(actions) {
 function menuTable(rows) {
   return `
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>item</th><th>brand</th><th>price</th><th>COGS</th><th>packaging</th><th>unit CM</th><th>CM %</th><th>volume rank</th><th>recommendation</th></tr></thead>
+      <thead><tr><th>item</th><th>brand</th><th>price</th><th>COGS</th><th>packaging</th><th>unit CM</th><th>CM %</th><th>refund</th><th>volume rank</th><th>recommendation</th></tr></thead>
       <tbody>
         ${rows.map((row) => `
           <tr>
@@ -442,6 +448,7 @@ function menuTable(rows) {
             <td>${formatters.currency(row.packaging)}</td>
             <td>${formatters.currency(row.unitContribution)}</td>
             <td class="${row.marginPct < 0.34 ? "bad" : row.marginPct > 0.52 ? "good" : ""}">${formatters.percent(row.marginPct)}</td>
+            <td class="${row.summary.refundRate > 0.035 ? "bad" : ""}">${formatters.percent(row.summary.refundRate)}</td>
             <td>#${row.volumeRank}</td>
             <td><span class="status ${row.recommendation.includes("reprice") || row.recommendation.includes("audit") ? "medium" : "low"}">${row.recommendation}</span></td>
           </tr>
@@ -605,6 +612,7 @@ function bindShellEvents() {
   document.querySelectorAll("[data-scenario]").forEach((input) => {
     input.addEventListener("input", () => {
       state.scenario[input.dataset.scenario] = Number(input.value);
+      state.scenarioPreset = "custom";
       render();
     });
   });
@@ -690,6 +698,7 @@ function exportButton(filename) {
 }
 
 function applyPreset(value) {
+  state.scenarioPreset = value;
   if (value === "base") state.scenario = { directMixLift: 0, foodInflation: 0, volumeGrowth: 0, laborEfficiency: 0, refundReduction: 0 };
   if (value === "direct") state.scenario = { directMixLift: 6, foodInflation: 0, volumeGrowth: 2, laborEfficiency: 1, refundReduction: 0.7 };
   if (value === "cost") state.scenario = { directMixLift: 2, foodInflation: 4, volumeGrowth: 1, laborEfficiency: 0.5, refundReduction: 0.2 };
@@ -857,6 +866,7 @@ function menuExportRow(row) {
     packaging: row.packaging,
     unit_contribution: row.unitContribution,
     margin_pct: row.marginPct,
+    refund_rate: row.summary.refundRate,
     volume_rank: row.volumeRank,
     recommendation: row.recommendation
   };
