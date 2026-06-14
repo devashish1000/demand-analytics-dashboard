@@ -4,6 +4,11 @@ const channelById = Object.fromEntries(CHANNELS.map((channel) => [channel.id, ch
 const locationById = Object.fromEntries(LOCATIONS.map((location) => [location.id, location]));
 const brandById = Object.fromEntries(BRANDS.map((brand) => [brand.id, brand]));
 const itemById = Object.fromEntries(MENU_ITEMS.map((item) => [item.id, item]));
+const EMPTY_ORDERS = Object.freeze([]);
+const EMPTY_LABOR = Object.freeze([]);
+const DATA_CACHES = new WeakMap();
+const SUMMARY_CACHES = new WeakMap();
+const CHANNEL_MIX_CACHES = new WeakMap();
 
 export const formatters = {
   currency(value, compact = false) {
@@ -49,6 +54,46 @@ export function laborCost(row) {
   return row.actualHours * row.hourlyRate * (1 + row.payrollBurdenRate);
 }
 
+function cacheForData(data) {
+  const cacheKey = data?.orders || data;
+  let cache = DATA_CACHES.get(cacheKey);
+  if (!cache) {
+    cache = {
+      filtered: new Map(),
+      comparisons: new Map(),
+      locations: new Map(),
+      menus: new Map(),
+      forecasts: new Map()
+    };
+    DATA_CACHES.set(cacheKey, cache);
+  }
+  return cache;
+}
+
+function filterKey(filters = {}) {
+  const range = filters.range || {};
+  return [
+    range.start || "",
+    range.end || "",
+    filters.market || "all",
+    filters.district || "all",
+    filters.locationId || "all",
+    filters.brandId || "all",
+    filters.channelId || "all"
+  ].join("|");
+}
+
+function scenarioKey(scenario = {}, weeks = "") {
+  return [
+    weeks,
+    Number(scenario.directMixLift || 0),
+    Number(scenario.foodInflation || 0),
+    Number(scenario.volumeGrowth || 0),
+    Number(scenario.laborEfficiency || 0),
+    Number(scenario.refundReduction || 0)
+  ].join("|");
+}
+
 /*
  * Labor rows are exported by date/location, while brand and channel filters are
  * order-level. Allocate location labor to the filtered order set by modeled prep
@@ -56,26 +101,39 @@ export function laborCost(row) {
  * for the entire kitchen shift.
  */
 export function filterData(data, filters) {
-  const baseOrders = data.orders.filter((order) => {
+  const cache = cacheForData(data);
+  const key = filterKey(filters);
+  if (cache.filtered.has(key)) return cache.filtered.get(key);
+
+  const baseOrders = [];
+  const orders = [];
+  const baseMinutesByKey = new Map();
+  const selectedMinutesByKey = new Map();
+
+  for (const order of data.orders) {
     const location = locationById[order.locationId];
-    const dateOk = !filters.range || isDateInRange(order.date, filters.range);
-    return (
-      dateOk &&
+    if (!location) continue;
+    if (
+      (!filters.range || isDateInRange(order.date, filters.range)) &&
       matches(filters.market, location.market) &&
       matches(filters.district, location.district) &&
       matches(filters.locationId, order.locationId)
-    );
-  });
+    ) {
+      baseOrders.push(order);
+      addMinutes(baseMinutesByKey, order);
+      if (
+        matches(filters.brandId, order.brandId) &&
+        matches(filters.channelId, order.channelId)
+      ) {
+        orders.push(order);
+        addMinutes(selectedMinutesByKey, order);
+      }
+    }
+  }
 
-  const orders = baseOrders.filter((order) =>
-    matches(filters.brandId, order.brandId) &&
-    matches(filters.channelId, order.channelId)
-  );
-
-  const baseMinutesByKey = minutesByLaborKey(baseOrders);
-  const selectedMinutesByKey = minutesByLaborKey(orders);
   const labor = data.labor.flatMap((row) => {
     const location = locationById[row.locationId];
+    if (!location) return [];
     const dateOk = !filters.range || isDateInRange(row.date, filters.range);
     const locationOk =
       dateOk &&
@@ -97,15 +155,14 @@ export function filterData(data, filters) {
     }];
   });
 
-  return { ...data, orders, labor };
+  const result = { ...data, orders, labor };
+  cache.filtered.set(key, result);
+  return result;
 }
 
-function minutesByLaborKey(orders) {
-  return orders.reduce((totals, order) => {
-    const key = laborKey(order);
-    totals.set(key, (totals.get(key) || 0) + order.laborMinutes);
-    return totals;
-  }, new Map());
+function addMinutes(totals, order) {
+  const key = laborKey(order);
+  totals.set(key, (totals.get(key) || 0) + order.laborMinutes);
 }
 
 function laborKey(row) {
@@ -135,29 +192,68 @@ function matches(filterValue, actualValue) {
 }
 
 function isDateInRange(date, range) {
-  const value = new Date(`${date}T00:00:00`).getTime();
-  return value >= new Date(`${range.start}T00:00:00`).getTime() && value <= new Date(`${range.end}T00:00:00`).getTime();
+  return date >= range.start && date <= range.end;
 }
 
-export function summarize(orders, labor = []) {
-  const grossSales = sum(orders, (order) => order.grossSales);
-  const discounts = sum(orders, (order) => order.discount);
-  const merchantPromo = sum(orders, (order) => order.merchantPromo);
-  const merchantRefunds = sum(orders, (order) => order.refundMerchant);
-  const platformRefunds = sum(orders, (order) => order.refundPlatform);
-  const netSales = sum(orders, orderNetRevenue);
-  const platformFees = sum(orders, (order) => order.platformFee);
-  const paymentFees = sum(orders, (order) => order.paymentFee);
-  const foodCost = sum(orders, (order) => order.foodCost);
-  const packagingCost = sum(orders, (order) => order.packagingCost);
-  const directSales = sum(orders.filter((order) => order.channelId === "direct"), orderNetRevenue);
-  const laborExpense = sum(labor, laborCost);
+function cachedSummary(orders, labor) {
+  const laborMap = SUMMARY_CACHES.get(orders);
+  return laborMap?.get(labor);
+}
+
+function setCachedSummary(orders, labor, summary) {
+  let laborMap = SUMMARY_CACHES.get(orders);
+  if (!laborMap) {
+    laborMap = new WeakMap();
+    SUMMARY_CACHES.set(orders, laborMap);
+  }
+  laborMap.set(labor, summary);
+}
+
+export function summarize(orders = EMPTY_ORDERS, labor = EMPTY_LABOR) {
+  const orderRows = orders || EMPTY_ORDERS;
+  const laborRows = labor || EMPTY_LABOR;
+  const cached = cachedSummary(orderRows, laborRows);
+  if (cached) return cached;
+
+  let grossSales = 0;
+  let discounts = 0;
+  let merchantPromo = 0;
+  let merchantRefunds = 0;
+  let platformRefunds = 0;
+  let netSales = 0;
+  let platformFees = 0;
+  let paymentFees = 0;
+  let foodCost = 0;
+  let packagingCost = 0;
+  let directSales = 0;
+  let quantity = 0;
+
+  for (const order of orderRows) {
+    const netRevenue = orderNetRevenue(order);
+    grossSales += Number(order.grossSales) || 0;
+    discounts += Number(order.discount) || 0;
+    merchantPromo += Number(order.merchantPromo) || 0;
+    merchantRefunds += Number(order.refundMerchant) || 0;
+    platformRefunds += Number(order.refundPlatform) || 0;
+    netSales += netRevenue;
+    platformFees += Number(order.platformFee) || 0;
+    paymentFees += Number(order.paymentFee) || 0;
+    foodCost += Number(order.foodCost) || 0;
+    packagingCost += Number(order.packagingCost) || 0;
+    quantity += Number(order.quantity) || 0;
+    if (order.channelId === "direct") directSales += netRevenue;
+  }
+
+  let laborExpense = 0;
+  for (const row of laborRows) {
+    laborExpense += laborCost(row);
+  }
+
   const contributionBeforeLabor = netSales - platformFees - paymentFees - foodCost - packagingCost;
   const contributionMargin = contributionBeforeLabor - laborExpense;
-  const orderCount = orders.length;
-  const quantity = sum(orders, (order) => order.quantity);
+  const orderCount = orderRows.length;
 
-  return {
+  const summary = {
     grossSales,
     discounts,
     merchantPromo,
@@ -182,18 +278,25 @@ export function summarize(orders, labor = []) {
     packagingPerOrder: safeDivide(packagingCost, orderCount),
     aov: safeDivide(netSales, orderCount)
   };
+  setCachedSummary(orderRows, laborRows, summary);
+  return summary;
 }
 
 export function comparePeriods(data, filters) {
+  const cache = cacheForData(data);
+  const key = filterKey(filters);
+  if (cache.comparisons.has(key)) return cache.comparisons.get(key);
   const current = filterData(data, filters);
   const previousRange = shiftRange(filters.range, -rangeLengthDays(filters.range));
   const previous = filterData(data, { ...filters, range: previousRange });
-  return {
+  const comparison = {
     current,
     previous,
     currentSummary: summarize(current.orders, current.labor),
     previousSummary: summarize(previous.orders, previous.labor)
   };
+  cache.comparisons.set(key, comparison);
+  return comparison;
 }
 
 function shiftRange(range, days) {
@@ -242,24 +345,52 @@ export function varianceBridge(currentSummary, previousSummary) {
 }
 
 export function channelMix(orders) {
-  const grouped = groupBy(orders, (order) => order.channelId);
-  const totalNetSales = sum(orders, orderNetRevenue);
-  return Object.entries(grouped)
-    .map(([channelId, rows]) => ({
-      id: channelId,
-      label: channelById[channelId]?.name || channelId,
-      value: sum(rows, orderNetRevenue),
-      pct: safeDivide(sum(rows, orderNetRevenue), totalNetSales),
-      color: channelById[channelId]?.color || "#777",
-      orders: rows.length
+  const orderRows = orders || EMPTY_ORDERS;
+  if (CHANNEL_MIX_CACHES.has(orderRows)) return CHANNEL_MIX_CACHES.get(orderRows);
+  const grouped = orderRows.reduce((groups, order) => {
+    const netSales = orderNetRevenue(order);
+    const row = groups[order.channelId] || {
+      id: order.channelId,
+      label: channelById[order.channelId]?.name || order.channelId,
+      value: 0,
+      color: channelById[order.channelId]?.color || "#777",
+      orders: 0
+    };
+    row.value += netSales;
+    row.orders += 1;
+    groups[order.channelId] = row;
+    return groups;
+  }, {});
+  const totalNetSales = Object.values(grouped).reduce((total, row) => total + row.value, 0);
+  const result = Object.values(grouped)
+    .map((row) => ({
+      ...row,
+      pct: safeDivide(row.value, totalNetSales)
     }))
     .sort((a, b) => b.value - a.value);
+  CHANNEL_MIX_CACHES.set(orderRows, result);
+  return result;
 }
 
 export function locationPerformance(data, filters) {
-  return matchingLocations(filters).map((location) => {
-    const locationFilters = { ...filters, locationId: location.id };
-    const { currentSummary, previousSummary, current, previous } = comparePeriods(data, locationFilters);
+  const cache = cacheForData(data);
+  const key = filterKey(filters);
+  if (cache.locations.has(key)) return cache.locations.get(key);
+
+  const locations = matchingLocations(filters);
+  const previousRange = shiftRange(filters.range, -rangeLengthDays(filters.range));
+  const current = filterData(data, filters);
+  const previous = filterData(data, { ...filters, range: previousRange });
+  const currentOrdersByLocation = groupBy(current.orders, (order) => order.locationId);
+  const previousOrdersByLocation = groupBy(previous.orders, (order) => order.locationId);
+  const currentLaborByLocation = groupBy(current.labor, (row) => row.locationId);
+  const previousLaborByLocation = groupBy(previous.labor, (row) => row.locationId);
+
+  const result = locations.map((location) => {
+    const currentOrders = currentOrdersByLocation[location.id] || EMPTY_ORDERS;
+    const previousOrders = previousOrdersByLocation[location.id] || EMPTY_ORDERS;
+    const currentSummary = summarize(currentOrders, currentLaborByLocation[location.id] || EMPTY_LABOR);
+    const previousSummary = summarize(previousOrders, previousLaborByLocation[location.id] || EMPTY_LABOR);
     const delta = currentSummary.marginPct - previousSummary.marginPct;
     const bridge = varianceBridge(currentSummary, previousSummary).filter((item) => item.type !== "start" && item.type !== "end");
     const topDriver = bridge.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -273,16 +404,22 @@ export function locationPerformance(data, filters) {
       delta,
       topDriver,
       risk: riskScore >= 5 ? "high" : riskScore >= 2 ? "medium" : "low",
-      orders: current.orders.length,
-      previousOrders: previous.orders.length
+      orders: currentOrders.length,
+      previousOrders: previousOrders.length
     };
   }).filter((location) => location.orders + location.previousOrders > 0).sort((a, b) => {
     const order = { high: 3, medium: 2, low: 1 };
     return order[b.risk] - order[a.risk] || a.summary.marginPct - b.summary.marginPct;
   });
+  cache.locations.set(key, result);
+  return result;
 }
 
 export function menuPerformance(data, filters) {
+  const cache = cacheForData(data);
+  const key = filterKey(filters);
+  if (cache.menus.has(key)) return cache.menus.get(key);
+
   const filtered = filterData(data, filters);
   const grouped = groupBy(filtered.orders, (order) => order.itemId);
   const previous = filterData(data, { ...filters, range: shiftRange(filters.range, -7) });
@@ -309,7 +446,9 @@ export function menuPerformance(data, filters) {
     row.volumeRank = index + 1;
   });
 
-  return rows.sort((a, b) => a.marginPct - b.marginPct);
+  const result = rows.sort((a, b) => a.marginPct - b.marginPct);
+  cache.menus.set(key, result);
+  return result;
 }
 
 function recommendationForItem(summary, marginPct, orderCount) {
@@ -326,6 +465,9 @@ function forecastWeekIndex(label) {
 
 export function forecastSeries(data, filters, scenario = {}, options = {}) {
   const weeks = Number.isFinite(Number(options.forecastWeeks)) ? Number(options.forecastWeeks) : Number.MAX_SAFE_INTEGER;
+  const cache = cacheForData(data);
+  const key = `${filterKey(filters)}|${scenarioKey(scenario, weeks)}`;
+  if (cache.forecasts.has(key)) return cache.forecasts.get(key);
 
   const locationIds = new Set(
     LOCATIONS.filter((location) =>
@@ -335,7 +477,9 @@ export function forecastSeries(data, filters, scenario = {}, options = {}) {
     ).map((location) => location.id)
   );
   const baseActual = filterData(data, { ...filters, brandId: "all", channelId: "all" });
-  const segmentActual = filterData(data, filters);
+  const segmentActual = matches(filters.brandId, "all") && matches(filters.channelId, "all")
+    ? baseActual
+    : filterData(data, filters);
   const baseSummary = summarize(baseActual.orders, baseActual.labor);
   const segmentSummary = summarize(segmentActual.orders, segmentActual.labor);
   const revenueShare = boundedShare(segmentSummary.netSales, baseSummary.netSales);
@@ -352,7 +496,7 @@ export function forecastSeries(data, filters, scenario = {}, options = {}) {
 
   const orderedWeeks = Object.entries(grouped).sort(([left], [right]) => forecastWeekIndex(left) - forecastWeekIndex(right));
 
-  return orderedWeeks.slice(0, Math.max(1, Math.min(weeks, orderedWeeks.length))).map(([week, rows], index) => {
+  const result = orderedWeeks.slice(0, Math.max(1, Math.min(weeks, orderedWeeks.length))).map(([week, rows], index) => {
     const revenue = sum(rows, (row) => row.revenueForecast) * revenueShare * (1 + scenarioVolumeGrowth);
     const baseRevenue = sum(rows, (row) => row.revenueForecast) * revenueShare;
     const orders = sum(rows, (row) => row.ordersForecast) * orderShare * (1 + scenarioVolumeGrowth);
@@ -384,6 +528,8 @@ export function forecastSeries(data, filters, scenario = {}, options = {}) {
       confidenceHigh: sum(rows, (row) => row.confidenceHigh)
     };
   });
+  cache.forecasts.set(key, result);
+  return result;
 }
 
 export function weeklySummary(data, filters, scenario, options = {}) {

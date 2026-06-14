@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createSampleData } from "../src/data.js";
 import {
+  channelMix,
   comparePeriods,
   filterData,
   forecastSeries,
@@ -68,6 +69,8 @@ const allLaborExpense = summarize(allFiltered.orders, allFiltered.labor).laborEx
 const brandLaborExpense = summarize(brandFiltered.orders, brandFiltered.labor).laborExpense;
 assert.ok(brandLaborExpense > 0, "brand-filtered P&L should include allocated labor");
 assert.ok(brandLaborExpense < allLaborExpense, "brand-filtered P&L should not absorb full kitchen labor");
+assert.strictEqual(filterData(data, filters), filterData(data, filters), "filtered operating data should be cached by stable filter key");
+assert.strictEqual(comparePeriods(data, filters), comparePeriods(data, filters), "period comparisons should be cached by stable filter key");
 
 const menuRows = menuPerformance(data, filters);
 assert.equal(menuRows.length, data.menuItems.length, "menu table should include all menu items with activity");
@@ -92,6 +95,42 @@ const summaryText = weeklySummary(data, filters, {
 });
 assert.ok(summaryText.changed.length >= 3, "weekly summary should include what changed");
 assert.ok(summaryText.why.length >= 3, "weekly summary should include variance drivers");
+
+const parityFilters = [
+  filters,
+  { ...filters, market: "Chicago" },
+  { ...filters, market: "Los Angeles", district: "LA1", locationId: "la-culver" },
+  { ...filters, brandId: "moonbowls" },
+  { ...filters, channelId: "direct" },
+  { ...filters, range: { start: "2024-05-14", end: "2026-05-11" } }
+];
+
+for (const scopedFilters of parityFilters) {
+  const scoped = filterData(data, scopedFilters);
+  const scopedSummary = summarize(scoped.orders, scoped.labor);
+  assert.ok(scopedSummary.netSales >= 0, "scoped summary should never produce negative net sales");
+  assert.ok(scopedSummary.marginPct > -0.2 && scopedSummary.marginPct < 0.7, "scoped summary should stay in realistic margin bounds");
+
+  const scopedMix = channelMix(scoped.orders);
+  const mixTotal = scopedMix.reduce((total, row) => total + row.value, 0);
+  assert.equal(Number(mixTotal.toFixed(2)), Number(scopedSummary.netSales.toFixed(2)), "channel mix should reconcile to scoped net sales");
+
+  const scopedLocations = locationPerformance(data, scopedFilters);
+  assert.ok(scopedLocations.every((location) => scopedFilters.market === "all" || location.market === scopedFilters.market), "location rows should respect market filters");
+  assert.ok(scopedLocations.every((location) => scopedFilters.locationId === "all" || location.id === scopedFilters.locationId), "location rows should respect location filters");
+
+  const scopedMenu = menuPerformance(data, scopedFilters);
+  assert.ok(scopedMenu.every((row) => row.summary.netSales >= 0), "menu rows should retain valid item economics after filtering");
+
+  const scopedForecast = forecastSeries(data, scopedFilters, {
+    directMixLift: 5,
+    foodInflation: 0,
+    volumeGrowth: 2,
+    laborEfficiency: 1,
+    refundReduction: 0.7
+  });
+  assert.ok(scopedForecast.length > 0 && scopedForecast.length <= 104, "forecast should remain populated for scoped filters");
+}
 
 const csv = toCsv([{ date: "2026-05-11", location: "Austin - South", brand: "moonbowls", channel: "direct", item: "Spicy Chicken Bowl", quantity: 2, gross_sales: 34.4 }]);
 const parsed = parseCsv(csv);

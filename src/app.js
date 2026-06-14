@@ -67,6 +67,8 @@ const state = {
   moreOpen: false,
   toast: ""
 };
+let renderFrame = 0;
+let chartFrame = 0;
 
 const nav = [
   { id: "overview", label: "executive overview", icon: "home" },
@@ -137,12 +139,22 @@ function render() {
     <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
   `;
   bindShellEvents();
-  window.requestAnimationFrame(() => {
+  if (chartFrame) window.cancelAnimationFrame(chartFrame);
+  chartFrame = window.requestAnimationFrame(() => {
+    chartFrame = 0;
     try {
       renderCharts();
     } catch (error) {
       console.error("Chart render failed", error);
     }
+  });
+}
+
+function scheduleRender() {
+  if (renderFrame) return;
+  renderFrame = window.requestAnimationFrame(() => {
+    renderFrame = 0;
+    render();
   });
 }
 
@@ -979,7 +991,7 @@ function bindShellEvents() {
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
       state.moreOpen = false;
-      render();
+      scheduleRender();
     });
   });
   document.querySelectorAll("[data-filter]").forEach((select) => {
@@ -993,7 +1005,6 @@ function bindShellEvents() {
       storedActions[select.dataset.status] = select.value;
       localStorage.setItem("salted-actions", JSON.stringify(storedActions));
       notify("Action status updated.");
-      render();
     });
   });
   document.querySelectorAll("[data-saved]").forEach((button) => {
@@ -1003,7 +1014,7 @@ function bindShellEvents() {
     input.addEventListener("input", () => {
       state.scenario[input.dataset.scenario] = Number(input.value);
       state.scenarioPreset = "custom";
-      render();
+      scheduleRender();
     });
     input.addEventListener("keydown", (event) => {
       const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
@@ -1016,7 +1027,7 @@ function bindShellEvents() {
       const next = event.key === "Home" ? min : event.key === "End" ? max : current + direction * step;
       state.scenario[input.dataset.scenario] = Number(Math.min(max, Math.max(min, next)).toFixed(2));
       state.scenarioPreset = "custom";
-      render();
+      scheduleRender();
     });
   });
   const preset = document.querySelector("[data-scenario-preset]");
@@ -1025,7 +1036,6 @@ function bindShellEvents() {
   if (menuSort) menuSort.addEventListener("change", () => {
     state.menuSort = menuSort.value;
     notify(`Menu sorted by ${menuSort.selectedOptions[0]?.textContent || "selected option"}.`);
-    render();
   });
   const uploadKind = document.querySelector("[data-upload-kind]");
   if (uploadKind) uploadKind.addEventListener("change", () => {
@@ -1033,34 +1043,44 @@ function bindShellEvents() {
     state.uploadRows = [];
     state.uploadMeta = { attempted: false, fileName: "", rowCount: 0 };
     notify(`Upload schema set to ${uploadKind.selectedOptions[0]?.textContent || uploadKind.value}.`);
-    render();
   });
   const uploadFile = document.querySelector("[data-upload-file]");
   if (uploadFile) uploadFile.addEventListener("change", handleUpload);
 }
 
 function renderCharts() {
-  const comparison = comparePeriods(sampleData, state.filters);
-  const bridge = varianceBridge(comparison.currentSummary, comparison.previousSummary);
-  const mix = channelMix(comparison.current.orders);
-  const hasForecastChart = document.getElementById("forecast-chart") || document.getElementById("forecast-detail-chart");
-  const hasMenuChart = document.getElementById("menu-bars");
+  const waterfallNode = document.getElementById("waterfall");
+  const pnlWaterfallNode = document.getElementById("pnl-waterfall");
+  const donutNode = document.getElementById("donut");
+  const forecastChartNode = document.getElementById("forecast-chart");
+  const forecastDetailNode = document.getElementById("forecast-detail-chart");
+  const menuChartNode = document.getElementById("menu-bars");
+
+  let comparison;
+  let bridge;
+  let mix;
+  if (waterfallNode || pnlWaterfallNode || donutNode) {
+    comparison = comparePeriods(sampleData, state.filters);
+    if (waterfallNode || pnlWaterfallNode) {
+      bridge = varianceBridge(comparison.currentSummary, comparison.previousSummary);
+    }
+    if (donutNode) {
+      mix = channelMix(comparison.current.orders);
+    }
+  }
+
+  const hasForecastChart = forecastChartNode || forecastDetailNode;
   const forecast = hasForecastChart ? forecastSeries(sampleData, state.filters, state.scenario, {
     forecastWeeks: state.forecastWeeks
   }) : [];
-  const menuRows = hasMenuChart ? menuPerformance(sampleData, state.filters).slice(0, 8) : [];
-  const charts = [
-    ["waterfall", (node) => renderWaterfall(node, bridge)],
-    ["pnl-waterfall", (node) => renderWaterfall(node, bridge)],
-    ["donut", (node) => renderDonut(node, mix)],
-    ["forecast-chart", (node) => renderForecast(node, forecast, { labelMode: "compact" })],
-    ["forecast-detail-chart", (node) => renderForecast(node, forecast, { labelMode: "full" })],
-    ["menu-bars", (node) => renderBarTrend(node, menuRows, (row) => row.marginPct, (row) => row.name)]
-  ];
-  charts.forEach(([id, renderer]) => {
-    const node = document.getElementById(id);
-    if (node) renderer(node);
-  });
+  const menuRows = menuChartNode ? menuPerformance(sampleData, state.filters).slice(0, 8) : [];
+
+  if (waterfallNode) renderWaterfall(waterfallNode, bridge);
+  if (pnlWaterfallNode) renderWaterfall(pnlWaterfallNode, bridge);
+  if (donutNode) renderDonut(donutNode, mix);
+  if (forecastChartNode) renderForecast(forecastChartNode, forecast, { labelMode: "compact" });
+  if (forecastDetailNode) renderForecast(forecastDetailNode, forecast, { labelMode: "full" });
+  if (menuChartNode) renderBarTrend(menuChartNode, menuRows, (row) => row.marginPct, (row) => row.name);
   document.querySelectorAll("[data-spark]").forEach((host) => {
     const values = host.dataset.spark.split("|").map(Number);
     renderSparkline(host, values, {
@@ -1100,67 +1120,85 @@ function updateFilter(key, value) {
       }
     }
   }
-  render();
+  scheduleRender();
 }
 
 function handleAction(action) {
-  const summary = weeklySummary(
-    { ...sampleData, actions: currentActions() },
-    state.filters,
-    state.scenario,
-    { forecastWeeks: state.forecastWeeks }
-  );
-  const locations = locationPerformance(sampleData, state.filters);
-  const menuRows = menuPerformance(sampleData, state.filters);
-  const forecast = forecastSeries(sampleData, state.filters, state.scenario, {
-    forecastWeeks: state.forecastWeeks
-  });
   if (action !== "more") state.moreOpen = false;
   if (action === "reset") {
     state.filters = { range: rangeForKey("current"), market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
     state.forecastWeeks = 104;
     state.moreOpen = false;
     notify("Filters reset.");
-    render();
+    return;
   }
-  if (action === "save") saveCurrentView();
+  if (action === "save") {
+    saveCurrentView();
+    return;
+  }
   if (action === "more") {
     state.moreOpen = !state.moreOpen;
-    render();
+    scheduleRender();
+    return;
   }
-  if (action === "copy-summary") copySummary(summary, notify);
+  const summary = () => weeklySummary(
+    { ...sampleData, actions: currentActions() },
+    state.filters,
+    state.scenario,
+    { forecastWeeks: state.forecastWeeks }
+  );
+  const locations = () => locationPerformance(sampleData, state.filters);
+  const menuRows = () => menuPerformance(sampleData, state.filters);
+  const forecast = () => forecastSeries(sampleData, state.filters, state.scenario, {
+    forecastWeeks: state.forecastWeeks
+  });
+  if (action === "copy-summary") {
+    copySummary(summary(), notify);
+    return;
+  }
   if (action === "download-summary") {
-    downloadSummary(summary);
+    downloadSummary(summary());
     notify("Weekly finance Excel report downloaded.");
+    return;
   }
-  if (action === "download-samples") downloadSamples();
+  if (action === "download-samples") {
+    downloadSamples();
+    return;
+  }
   if (action === "export-location-performance.xls") {
-    exportWorkbook("salted-location-performance.xls", workbookConfig("location", locations.map(locationExportRow), summary));
+    exportWorkbook("salted-location-performance.xls", workbookConfig("location", locations().map(locationExportRow), summary()));
     notify("Location P&L Excel export downloaded.");
+    return;
   }
   if (action === "export-menu-margin.xls") {
-    exportWorkbook("salted-menu-margin.xls", workbookConfig("menu", menuRows.map(menuExportRow), summary));
+    exportWorkbook("salted-menu-margin.xls", workbookConfig("menu", menuRows().map(menuExportRow), summary()));
     notify("Menu margin Excel export downloaded.");
+    return;
   }
   if (action === "export-rolling-forecast.xls") {
-    exportWorkbook("salted-rolling-forecast.xls", workbookConfig("forecast", forecast.map(forecastExportRow), summary));
+    exportWorkbook("salted-rolling-forecast.xls", workbookConfig("forecast", forecast().map(forecastExportRow), summary()));
     notify("Rolling forecast Excel export downloaded.");
+    return;
   }
   if (action === "export-operator-actions.xls") {
-    exportWorkbook("salted-operator-actions.xls", workbookConfig("actions", buildActionCsv(currentActions()), summary));
+    exportWorkbook("salted-operator-actions.xls", workbookConfig("actions", buildActionCsv(currentActions()), summary()));
     notify("Operator actions Excel export downloaded.");
+    return;
   }
   if (action === "export-location-performance.csv") {
-    exportRows("location-performance.csv", locations.map(locationExportRow));
+    exportRows("location-performance.csv", locations().map(locationExportRow));
     notify("Location P&L CSV export downloaded.");
+    return;
   }
   if (action === "export-menu-margin.csv") {
-    exportRows("menu-margin.csv", menuRows.map(menuExportRow));
+    exportRows("menu-margin.csv", menuRows().map(menuExportRow));
     notify("Menu margin CSV export downloaded.");
+    return;
   }
   if (action === "export-rolling-forecast.csv") {
-    exportRows("rolling-forecast.csv", forecast.map(forecastExportRow));
+    exportRows("rolling-forecast.csv", forecast().map(forecastExportRow));
     notify("Rolling forecast CSV export downloaded.");
+    return;
   }
   if (action === "export-operator-actions.csv") {
     exportRows("operator-actions.csv", buildActionCsv(currentActions()));
@@ -1258,7 +1296,6 @@ function applyPreset(value) {
   if (value === "direct") state.scenario = { directMixLift: 6, foodInflation: 0, volumeGrowth: 2, laborEfficiency: 1, refundReduction: 0.7 };
   if (value === "cost") state.scenario = { directMixLift: 2, foodInflation: 4, volumeGrowth: 1, laborEfficiency: 0.5, refundReduction: 0.2 };
   notify(`Scenario preset applied: ${value}.`);
-  render();
 }
 
 async function handleUpload(event) {
@@ -1269,7 +1306,6 @@ async function handleUpload(event) {
   state.uploadRows = parseCsv(text);
   state.uploadMeta = { attempted: true, fileName: file.name, rowCount: state.uploadRows.length };
   notify(state.uploadRows.length ? `${state.uploadRows.length} CSV rows parsed.` : "CSV parsed, but no data rows were found.");
-  render();
 }
 
 function detectUploadKind(filename, fallback) {
@@ -1556,11 +1592,11 @@ function statusClass(status) {
 
 function notify(message) {
   state.toast = message;
-  render();
+  scheduleRender();
   window.clearTimeout(notify.timer);
   notify.timer = window.setTimeout(() => {
     state.toast = "";
-    render();
+    scheduleRender();
   }, 2200);
 }
 
