@@ -770,6 +770,14 @@ h2 span,
   align-items: center;
 }
 
+.export-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 .driver-list,
 .scenario-list {
   display: grid;

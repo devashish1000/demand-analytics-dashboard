@@ -12,8 +12,8 @@ import {
   weeklySummary
 } from "./calculations.js";
 import { renderBarTrend, renderDonut, renderForecast, renderSparkline, renderWaterfall } from "./charts.js";
-import { parseCsv, toCsv, validateUpload } from "./csv.js";
-import { buildActionCsv, copySummary, downloadSummary, exportRows } from "./export.js";
+import { parseCsv, validateUpload } from "./csv.js";
+import { buildActionCsv, copySummary, downloadSummary, exportRows, exportWorkbook } from "./export.js";
 
 const app = document.querySelector("#app");
 const sampleData = createSampleData();
@@ -235,7 +235,7 @@ function renderPnl() {
   const locations = locationPerformance(sampleData, state.filters);
   const bridge = varianceBridge(comparison.currentSummary, comparison.previousSummary);
   return `
-    <div class="section-heading"><div><h1>location + district P&L</h1><p>Transparent contribution margin by market, location, channel, and controllable cost driver.</p></div>${exportButton("location-performance.csv")}</div>
+    <div class="section-heading"><div><h1>location + district P&L</h1><p>Transparent contribution margin by market, location, channel, and controllable cost driver.</p></div>${exportButton("location-performance")}</div>
     <div class="dashboard-grid">
       <article class="panel span-8"><div class="panel-header"><div><h2>variance bridge</h2><p>Current period vs prior period</p></div></div><div id="pnl-waterfall" class="chart-host large"></div></article>
       <article class="panel span-4">${driverStack(bridge)}</article>
@@ -248,7 +248,7 @@ function renderMenu() {
   let rows = menuPerformance(sampleData, state.filters);
   rows = sortMenu(rows);
   return `
-    <div class="section-heading"><div><h1>menu item margin waterfall</h1><p>Find high-volume low-margin items, refund-heavy items, and promotion candidates.</p></div>${exportButton("menu-margin.csv")}</div>
+    <div class="section-heading"><div><h1>menu item margin waterfall</h1><p>Find high-volume low-margin items, refund-heavy items, and promotion candidates.</p></div>${exportButton("menu-margin")}</div>
     <div class="menu-hero panel">
       <img src="./assets/menu-strip.png" alt="Synthetic healthy bowl thumbnails used as sample menu context" />
       <div><strong>Menu thumbnails are synthetic sample assets.</strong><span>All margin values are calculated from item-level modeled data.</span></div>
@@ -268,7 +268,7 @@ function renderMenu() {
 function renderForecastView() {
   const series = forecastSeries(sampleData, state.filters, state.scenario);
   return `
-    <div class="section-heading"><div><h1>rolling forecast</h1><p>13-week forecast with scenario controls for direct mix, food cost, volume, labor, and refund improvement.</p></div>${exportButton("rolling-forecast.csv")}</div>
+    <div class="section-heading"><div><h1>rolling forecast</h1><p>13-week forecast with scenario controls for direct mix, food cost, volume, labor, and refund improvement.</p></div>${exportButton("rolling-forecast")}</div>
     <div class="dashboard-grid">
       <article class="panel span-8"><div class="panel-header"><div><h2>base vs scenario CM%</h2><p>Modeled trajectory from current sample operating drivers.</p></div></div><div id="forecast-detail-chart" class="chart-host large"></div></article>
       <article class="panel span-4">${scenarioControls(series)}</article>
@@ -280,7 +280,7 @@ function renderForecastView() {
 function renderActions() {
   const actions = currentActions();
   return `
-    <div class="section-heading"><div><h1>operator action queue</h1><p>Modeled evidence actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions.csv")}</div>
+    <div class="section-heading"><div><h1>operator action queue</h1><p>Modeled evidence actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions")}</div>
     <article class="panel">${actionTable(actions, true)}</article>
   `;
 }
@@ -288,7 +288,7 @@ function renderActions() {
 function renderSummary() {
   const summary = weeklySummary({ ...sampleData, actions: currentActions() }, state.filters, state.scenario);
   return `
-    <div class="section-heading"><div><h1>weekly finance summary</h1><p>A send-ready internal summary for finance, operations, and market leaders.</p></div><div class="section-actions"><button class="primary-btn" data-action="copy-summary">${icon("copy")} copy summary</button><button class="utility-btn" data-action="download-summary">${icon("download")} download report</button></div></div>
+    <div class="section-heading"><div><h1>weekly finance summary</h1><p>A send-ready internal summary for finance, operations, and market leaders.</p></div><div class="section-actions"><button class="utility-btn" data-action="copy-summary">${icon("copy")} copy summary</button><button class="primary-btn" data-action="download-summary">${icon("download")} Excel report</button></div></div>
     <div class="dashboard-grid">
       <article class="panel span-8 summary-document">${summaryDocument(summary)}</article>
       <article class="panel span-4">${forecastUpdate(summary)}</article>
@@ -299,7 +299,7 @@ function renderSummary() {
 function renderUpload() {
   const validation = validateUpload(state.uploadKind, state.uploadRows);
   return `
-    <div class="section-heading"><div><h1>data upload</h1><p>Validate CSV exports before connecting real POS, marketplace, labor, and forecast files.</p></div><button class="utility-btn" data-action="download-samples">${icon("download")} sample CSVs</button></div>
+    <div class="section-heading"><div><h1>data upload</h1><p>Validate CSV exports before connecting real POS, marketplace, labor, and forecast files.</p></div><button class="primary-btn" data-action="download-samples">${icon("download")} sample workbook</button></div>
     <div class="dashboard-grid">
       <article class="panel span-5">
         <div class="panel-header"><div><h2>upload CSV</h2><p>Prototype parser validates schema and previews rows.</p></div></div>
@@ -473,7 +473,7 @@ function summaryPanel(summary) {
   return `
     <div class="panel-header">
       <div><h2>weekly finance summary</h2><p>${summary.period}</p></div>
-      <div class="button-row"><button class="utility-btn icon-only" data-action="copy-summary" title="Copy">${icon("copy")}</button><button class="primary-btn" data-action="download-summary">download report</button></div>
+      <div class="button-row"><button class="utility-btn icon-only" data-action="copy-summary" title="Copy">${icon("copy")}</button><button class="primary-btn" data-action="download-summary">Excel report</button></div>
     </div>
     ${summaryDocument(summary, true)}
     ${forecastUpdate(summary)}
@@ -687,14 +687,97 @@ function handleAction(action) {
   if (action === "copy-summary") copySummary(summary, notify);
   if (action === "download-summary") downloadSummary(summary);
   if (action === "download-samples") downloadSamples();
+  if (action === "export-location-performance.xls") exportWorkbook("salted-location-performance.xls", workbookConfig("location", locations.map(locationExportRow), summary));
+  if (action === "export-menu-margin.xls") exportWorkbook("salted-menu-margin.xls", workbookConfig("menu", menuRows.map(menuExportRow), summary));
+  if (action === "export-rolling-forecast.xls") exportWorkbook("salted-rolling-forecast.xls", workbookConfig("forecast", forecast.map(forecastExportRow), summary));
+  if (action === "export-operator-actions.xls") exportWorkbook("salted-operator-actions.xls", workbookConfig("actions", buildActionCsv(currentActions()), summary));
   if (action === "export-location-performance.csv") exportRows("location-performance.csv", locations.map(locationExportRow));
   if (action === "export-menu-margin.csv") exportRows("menu-margin.csv", menuRows.map(menuExportRow));
   if (action === "export-rolling-forecast.csv") exportRows("rolling-forecast.csv", forecast.map(forecastExportRow));
   if (action === "export-operator-actions.csv") exportRows("operator-actions.csv", buildActionCsv(currentActions()));
 }
 
-function exportButton(filename) {
-  return `<button class="utility-btn" data-action="export-${filename}">${icon("download")} export CSV</button>`;
+function exportButton(baseName) {
+  return `
+    <div class="export-actions">
+      <button class="primary-btn" data-action="export-${baseName}.xls">${icon("download")} Excel</button>
+      <button class="utility-btn" data-action="export-${baseName}.csv">CSV</button>
+    </div>
+  `;
+}
+
+function workbookConfig(kind, rows, summary) {
+  const configs = {
+    location: {
+      title: "Location + District P&L",
+      tableTitle: "Location Operating Table",
+      columns: [
+        { key: "location", label: "Location", type: "text", width: 230 },
+        { key: "district", label: "District", type: "text", width: 80 },
+        { key: "market", label: "Market", type: "text", width: 140 },
+        { key: "net_sales", label: "Net Sales", type: "currency", width: 120 },
+        { key: "contribution_margin", label: "Contribution Margin", type: "currency", width: 150 },
+        { key: "margin_pct", label: "CM %", type: "percent", width: 90, tone: (value) => value < 0.18 ? "bad" : value > 0.22 ? "good" : "" },
+        { key: "delta_vs_prior", label: "Δ vs Prior", type: "points", width: 100 },
+        { key: "risk_driver", label: "Risk / Driver", type: "longText", width: 260 }
+      ]
+    },
+    menu: {
+      title: "Menu Item Margin Waterfall",
+      tableTitle: "Item Economics",
+      columns: [
+        { key: "item", label: "Item", type: "text", width: 220 },
+        { key: "brand", label: "Brand", type: "text", width: 170 },
+        { key: "price", label: "Price", type: "currency", width: 90 },
+        { key: "food_cost", label: "COGS", type: "currency", width: 90 },
+        { key: "packaging", label: "Packaging", type: "currency", width: 95 },
+        { key: "unit_contribution", label: "Unit CM", type: "currency", width: 95 },
+        { key: "margin_pct", label: "CM %", type: "percent", width: 90, tone: (value) => value < 0.34 ? "bad" : value > 0.52 ? "good" : "" },
+        { key: "refund_rate", label: "Refund Rate", type: "percent", width: 105, tone: (value) => value > 0.035 ? "bad" : "" },
+        { key: "volume_rank", label: "Volume Rank", type: "rank", width: 105 },
+        { key: "recommendation", label: "Recommendation", type: "recommendation", width: 230 }
+      ]
+    },
+    forecast: {
+      title: "13-Week Rolling Forecast",
+      tableTitle: "Forecast Detail",
+      columns: [
+        { key: "week", label: "Week", type: "text", width: 90 },
+        { key: "revenue", label: "Revenue", type: "currency", width: 120 },
+        { key: "orders", label: "Orders", type: "number", width: 100 },
+        { key: "cogs", label: "COGS", type: "currency", width: 115 },
+        { key: "labor", label: "Labor", type: "currency", width: 115 },
+        { key: "base_margin_pct", label: "Base CM %", type: "percent", width: 105 },
+        { key: "scenario_margin_pct", label: "Scenario CM %", type: "percent", width: 125, tone: () => "good" },
+        { key: "upside_pts", label: "Upside", type: "points", width: 100 }
+      ]
+    },
+    actions: {
+      title: "Operator Action Queue",
+      tableTitle: "Prioritized Actions",
+      columns: [
+        { key: "priority", label: "Priority", type: "risk", width: 90 },
+        { key: "location", label: "Location", type: "text", width: 170 },
+        { key: "issue", label: "Issue", type: "longText", width: 300 },
+        { key: "evidence", label: "Evidence", type: "longText", width: 390 },
+        { key: "estimated_margin_impact_pts", label: "Modeled Impact", type: "text", width: 120, format: (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(1)} pts`, tone: () => "good" },
+        { key: "owner", label: "Owner", type: "text", width: 160 },
+        { key: "status", label: "Status", type: "status", width: 120 },
+        { key: "due", label: "Due Date", type: "text", width: 110 }
+      ]
+    }
+  };
+  const config = configs[kind];
+  return {
+    ...config,
+    subtitle: periodLabel(),
+    rows,
+    summaryCards: [
+      ["Rows", formatters.number(rows.length), "neutral"],
+      ["Scenario Week 13 CM%", formatters.percent(summary.forecast.scenario), "good"],
+      ["Modeled Upside", formatters.points(summary.forecast.upside), "good"]
+    ]
+  };
 }
 
 function applyPreset(value) {
@@ -744,27 +827,115 @@ function downloadSamples() {
     labor_minutes: item.laborMinutes,
     category: item.category
   }));
-  const text = [
-    "orders.csv",
-    toCsv(orderRows),
-    "",
-    "labor.csv",
-    toCsv(laborRows),
-    "",
-    "forecast.csv",
-    toCsv(forecastRows),
-    "",
-    "menu_items.csv",
-    toCsv(menuRows)
-  ].join("\n\n");
-  const blob = new Blob([text], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "salted-sample-csv-templates.txt";
-  link.click();
-  URL.revokeObjectURL(url);
-  notify("Sample CSV templates downloaded.");
+  exportWorkbook("salted-sample-data-templates.xls", {
+    title: "Sample Data Templates",
+    subtitle: "Connector-ready CSV schemas",
+    summaryCards: [
+      ["Orders Rows", formatters.number(orderRows.length), "neutral"],
+      ["Labor Rows", formatters.number(laborRows.length), "neutral"],
+      ["Forecast Rows", formatters.number(forecastRows.length), "neutral"],
+      ["Menu Rows", formatters.number(menuRows.length), "neutral"]
+    ],
+    sections: [
+      ["Import Notes", [
+        "Use these sample schemas to map POS, marketplace, labor, COGS, and forecast exports into the prototype.",
+        "CSV exports remain available from operating views; this workbook is designed for human review and handoff."
+      ]]
+    ],
+    tables: [
+      {
+        title: "Template Guide",
+        rows: [
+          {
+            dataset: "Orders",
+            purpose: "Marketplace and direct-order sales by item, channel, and location.",
+            required_fields: "date, location, brand, channel, item, quantity, gross sales, discounts, promos, refunds, platform fees",
+            format_note: "One row per order-item line."
+          },
+          {
+            dataset: "Labor",
+            purpose: "Scheduled vs actual labor hours and fully loaded hourly cost.",
+            required_fields: "date, location, scheduled hours, actual hours, hourly rate, payroll burden",
+            format_note: "Daily rows by location."
+          },
+          {
+            dataset: "Forecast",
+            purpose: "13-week revenue, order, COGS, labor, and margin targets.",
+            required_fields: "week, location, revenue forecast, orders forecast, COGS forecast, labor forecast, margin forecast",
+            format_note: "Weekly rows by location."
+          },
+          {
+            dataset: "Menu COGS",
+            purpose: "Item-level price, food cost, packaging, and labor assumptions.",
+            required_fields: "brand, item, price, food cost, packaging cost, labor minutes, category",
+            format_note: "One row per sellable item."
+          }
+        ],
+        columns: [
+          { key: "dataset", label: "Dataset", type: "text", width: 170 },
+          { key: "purpose", label: "Business Purpose", type: "longText", width: 300 },
+          { key: "required_fields", label: "Required Fields", type: "longText", width: 420 },
+          { key: "format_note", label: "Format Note", type: "longText", width: 240 }
+        ]
+      },
+      {
+        title: "Orders CSV Template",
+        rows: orderRows.slice(0, 30),
+        columns: [
+          { key: "date", label: "Date", type: "text", width: 105 },
+          { key: "location", label: "Location", type: "text", width: 180 },
+          { key: "brand", label: "Brand", type: "text", width: 170 },
+          { key: "channel", label: "Channel", type: "text", width: 135 },
+          { key: "item", label: "Item", type: "text", width: 210 },
+          { key: "quantity", label: "Qty", type: "number", width: 70 },
+          { key: "gross_sales", label: "Gross Sales", type: "currency", width: 110 },
+          { key: "discount", label: "Discount", type: "currency", width: 95 },
+          { key: "merchant_promo", label: "Promo", type: "currency", width: 95 },
+          { key: "merchant_refund", label: "Refund", type: "currency", width: 95 },
+          { key: "platform_fee", label: "Platform Fee", type: "currency", width: 110 }
+        ]
+      },
+      {
+        title: "Labor CSV Template",
+        rows: laborRows.slice(0, 30),
+        columns: [
+          { key: "date", label: "Date", type: "text", width: 105 },
+          { key: "location", label: "Location", type: "text", width: 180 },
+          { key: "scheduled_hours", label: "Scheduled Hours", type: "number", width: 125 },
+          { key: "actual_hours", label: "Actual Hours", type: "number", width: 110 },
+          { key: "hourly_rate", label: "Hourly Rate", type: "currency", width: 105 },
+          { key: "payroll_burden_rate", label: "Payroll Burden", type: "percent", width: 120 }
+        ]
+      },
+      {
+        title: "Forecast CSV Template",
+        rows: forecastRows,
+        columns: [
+          { key: "week", label: "Week", type: "text", width: 95 },
+          { key: "location", label: "Location", type: "text", width: 180 },
+          { key: "revenue_forecast", label: "Revenue Forecast", type: "currency", width: 135 },
+          { key: "orders_forecast", label: "Orders Forecast", type: "number", width: 130 },
+          { key: "cogs_forecast", label: "COGS Forecast", type: "currency", width: 125 },
+          { key: "labor_forecast", label: "Labor Forecast", type: "currency", width: 125 },
+          { key: "margin_forecast", label: "CM Forecast", type: "percent", width: 110 }
+        ]
+      },
+      {
+        title: "Menu COGS CSV Template",
+        rows: menuRows,
+        columns: [
+          { key: "brand", label: "Brand", type: "text", width: 170 },
+          { key: "item", label: "Item", type: "text", width: 210 },
+          { key: "price", label: "Price", type: "currency", width: 90 },
+          { key: "food_cost", label: "COGS", type: "currency", width: 90 },
+          { key: "packaging_cost", label: "Packaging", type: "currency", width: 100 },
+          { key: "labor_minutes", label: "Labor Minutes", type: "number", width: 110 },
+          { key: "category", label: "Category", type: "text", width: 150 }
+        ]
+      }
+    ]
+  });
+  notify("Styled sample workbook downloaded.");
 }
 
 function applySavedView(name) {
@@ -843,6 +1014,14 @@ function formatShortDate(date) {
   return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function periodLabel() {
+  const start = new Date(`${state.filters.range.start}T00:00:00`);
+  const end = new Date(`${state.filters.range.end}T00:00:00`);
+  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} - ${endLabel}`;
+}
+
 function locationExportRow(row) {
   return {
     location: row.name,
@@ -853,7 +1032,8 @@ function locationExportRow(row) {
     margin_pct: row.summary.marginPct,
     delta_vs_prior: row.delta,
     risk: row.risk,
-    top_driver: row.topDriver?.driver || ""
+    top_driver: row.topDriver?.driver || "",
+    risk_driver: `${row.risk} - ${row.topDriver?.driver || "No current exception"}`
   };
 }
 
