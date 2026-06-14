@@ -10,6 +10,21 @@ function svg(width, height, className = "chart") {
   return node;
 }
 
+function resetChart(container) {
+  container.replaceChildren();
+  container.classList.add("interactive-chart-host");
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.hidden = true;
+  tooltip.setAttribute("role", "status");
+  tooltip.setAttribute("aria-live", "polite");
+  container.appendChild(tooltip);
+  container.onclick = (event) => {
+    if (!event.target.closest(".chart-mark")) hideTooltip(tooltip);
+  };
+  return tooltip;
+}
+
 function el(name, attrs = {}, text = "") {
   const node = document.createElementNS(SVG_NS, name);
   Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
@@ -33,7 +48,7 @@ function multilineText(parent, lines, attrs = {}, lineHeight = 10) {
 }
 
 export function renderSparkline(container, values, options = {}) {
-  container.replaceChildren();
+  const tooltip = resetChart(container);
   const width = options.width || 128;
   const height = options.height || 36;
   const node = svg(width, height, "sparkline");
@@ -57,11 +72,42 @@ export function renderSparkline(container, values, options = {}) {
       "stroke-linejoin": "round"
     })
   );
+  const lastX = width;
+  const lastY = height - ((values.at(-1) - min) / span) * (height - 8) - 4;
+  node.appendChild(el("circle", {
+    cx: round(lastX, 1),
+    cy: round(lastY, 1),
+    r: 3.5,
+    class: "spark-end-point",
+    fill: options.color || "#2f7d48"
+  }));
+  const hit = el("rect", {
+    x: 0,
+    y: 0,
+    width,
+    height,
+    rx: 6,
+    class: "chart-hit-area chart-mark spark-hit",
+    tabindex: 0,
+    role: "button",
+    "aria-label": `${options.title || "Metric trend"} trend detail`
+  });
+  node.appendChild(hit);
+  registerMark(hit, container, tooltip, {
+    title: options.title || "Metric trend",
+    kicker: "prior 7 day movement",
+    rows: [
+      ["Current", options.current || formatters.currency(values.at(-1), true)],
+      ["Prior", options.previous || "prior period"],
+      ["Change", options.delta || "trend available"]
+    ],
+    note: "Sparkline is modeled from the current dashboard filter."
+  });
   container.appendChild(node);
 }
 
 export function renderWaterfall(container, bridge) {
-  container.replaceChildren();
+  const tooltip = resetChart(container);
   const width = 620;
   const height = 264;
   const pad = { top: 28, right: 22, bottom: 66, left: 46 };
@@ -107,7 +153,27 @@ export function renderWaterfall(container, bridge) {
       );
       cursor = next;
     }
-    node.appendChild(el("rect", { x, y, width: barWidth, height: barHeight, rx: 2, class: colorClass }));
+    const visual = el("rect", { x, y, width: barWidth, height: barHeight, rx: 3, class: `${colorClass} waterfall-visual` });
+    const hitGroup = el("g", {
+      class: "chart-interactive-group chart-mark waterfall-group",
+      tabindex: 0,
+      role: "button",
+      "aria-label": `${item.label} ${item.type ? formatters.percent(item.value) : formatters.points(item.value)}`
+    });
+    hitGroup.appendChild(visual);
+    const hitTop = Math.min(y, yScale(cursor)) - 12;
+    hitGroup.appendChild(el("rect", {
+      x: x - 5,
+      y: Math.max(pad.top - 6, hitTop),
+      width: barWidth + 10,
+      height: Math.max(28, barHeight + 24),
+      rx: 5,
+      class: "chart-hit-area"
+    }));
+    node.appendChild(hitGroup);
+    const driverStart = item.type ? null : cursor - item.value;
+    const driverEnd = item.type ? null : cursor;
+    registerMark(hitGroup, container, tooltip, waterfallTooltip(item, driverStart, driverEnd));
     node.appendChild(
       el(
         "text",
@@ -132,7 +198,7 @@ export function renderWaterfall(container, bridge) {
 }
 
 export function renderDonut(container, rows) {
-  container.replaceChildren();
+  const tooltip = resetChart(container);
   const width = 260;
   const height = 220;
   const cx = 105;
@@ -143,19 +209,36 @@ export function renderDonut(container, rows) {
   let startAngle = -90;
 
   if (rows.length === 1 && rows[0].pct >= 0.999) {
-    node.appendChild(el("circle", {
+    const segment = el("circle", {
       cx,
       cy,
       r: radius - thickness / 2,
       fill: "none",
       stroke: rows[0].color,
-      "stroke-width": thickness
-    }));
+      "stroke-width": thickness,
+      class: "donut-segment donut-full chart-mark",
+      tabindex: 0,
+      role: "button",
+      "aria-label": `${rows[0].label} ${formatters.percent(rows[0].pct)}`
+    });
+    node.appendChild(segment);
+    registerMark(segment, container, tooltip, donutTooltip(rows[0]));
   } else {
     rows.forEach((row) => {
       const endAngle = startAngle + row.pct * 360;
       const path = donutSegment(cx, cy, radius, thickness, startAngle, endAngle);
-      node.appendChild(el("path", { d: path, fill: row.color, stroke: "#fff", "stroke-width": "2" }));
+      const segment = el("path", {
+        d: path,
+        fill: row.color,
+        stroke: "#fff",
+        "stroke-width": "2",
+        class: "donut-segment chart-mark",
+        tabindex: 0,
+        role: "button",
+        "aria-label": `${row.label} ${formatters.percent(row.pct)}`
+      });
+      node.appendChild(segment);
+      registerMark(segment, container, tooltip, donutTooltip(row));
       startAngle = endAngle;
     });
   }
@@ -166,7 +249,7 @@ export function renderDonut(container, rows) {
 }
 
 export function renderForecast(container, series) {
-  container.replaceChildren();
+  const tooltip = resetChart(container);
   const width = 650;
   const height = 290;
   const pad = { top: 22, right: 24, bottom: 38, left: 46 };
@@ -188,6 +271,35 @@ export function renderForecast(container, series) {
   node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: y(0.2), y2: y(0.2), class: "target-line" }));
 
   series.forEach((row, index) => {
+    const pointX = x(index);
+    const group = el("g", {
+      class: "chart-interactive-group chart-mark forecast-hover-group",
+      tabindex: 0,
+      role: "button",
+      "aria-label": `${row.week} base ${formatters.percent(row.baseMarginPct)} scenario ${formatters.percent(row.scenarioMarginPct)}`
+    });
+    const bandWidth = Math.max(28, (width - pad.left - pad.right) / series.length);
+    group.appendChild(el("line", {
+      x1: pointX,
+      x2: pointX,
+      y1: pad.top,
+      y2: height - pad.bottom,
+      class: "forecast-hover-line"
+    }));
+    group.appendChild(el("circle", { cx: pointX, cy: y(row.baseMarginPct), r: 4, class: "forecast-point base" }));
+    group.appendChild(el("circle", { cx: pointX, cy: y(row.scenarioMarginPct), r: 4, class: "forecast-point scenario" }));
+    group.appendChild(el("rect", {
+      x: pointX - bandWidth / 2,
+      y: pad.top,
+      width: bandWidth,
+      height: height - pad.top - pad.bottom,
+      class: "chart-hit-area"
+    }));
+    node.appendChild(group);
+    registerMark(group, container, tooltip, forecastTooltip(row));
+  });
+
+  series.forEach((row, index) => {
     if (index % 2 === 0 || index === series.length - 1) {
       node.appendChild(el("text", { x: x(index), y: height - 12, class: "axis-label chart-x-label forecast-x-label", "text-anchor": "middle" }, `W${index + 1}`));
     }
@@ -197,7 +309,7 @@ export function renderForecast(container, series) {
 }
 
 export function renderBarTrend(container, rows, accessor, labelAccessor) {
-  container.replaceChildren();
+  const tooltip = resetChart(container);
   const width = 520;
   const height = 246;
   const pad = { top: 26, right: 54, bottom: 18, left: 154 };
@@ -224,11 +336,208 @@ export function renderBarTrend(container, rows, accessor, labelAccessor) {
         truncateLabel(labelAccessor(row), 23)
       )
     );
-    node.appendChild(el("rect", { x: pad.left, y: y - 7, width: barWidth, height: 14, rx: 3, class: value < 0.34 ? "bar-bad" : value > 0.52 ? "bar-good" : "bar-neutral" }));
+    const group = el("g", {
+      class: "chart-interactive-group chart-mark menu-bar-group",
+      tabindex: 0,
+      role: "button",
+      "aria-label": `${labelAccessor(row)} ${formatters.percent(value)} contribution margin`
+    });
+    group.appendChild(el("rect", { x: pad.left, y: y - 8, width: barWidth, height: 16, rx: 4, class: `${value < 0.34 ? "bar-bad" : value > 0.52 ? "bar-good" : "bar-neutral"} menu-bar-visual` }));
+    group.appendChild(el("rect", { x: 0, y: y - rowStep / 2 + 2, width: width - 12, height: Math.max(22, rowStep - 4), rx: 5, class: "chart-hit-area" }));
+    node.appendChild(group);
+    registerMark(group, container, tooltip, menuTooltip(row, value));
     node.appendChild(el("text", { x: pad.left + barWidth + 7, y: y + 4, class: value < 0.34 ? "value-label bad menu-value-label" : "value-label menu-value-label" }, formatters.percent(value)));
   });
 
   container.appendChild(node);
+}
+
+function registerMark(mark, container, tooltip, content) {
+  mark.setAttribute("focusable", "true");
+  const showFromEvent = (event) => {
+    event.stopPropagation();
+    setActiveMark(mark);
+    showTooltip(tooltip, container, content, { clientX: event.clientX, clientY: event.clientY }, mark);
+  };
+  mark.addEventListener("pointerenter", showFromEvent);
+  mark.addEventListener("pointermove", showFromEvent);
+  mark.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "touch") {
+      clearActiveMarks(mark);
+      hideTooltip(tooltip);
+    }
+  });
+  mark.addEventListener("focus", () => {
+    setActiveMark(mark);
+    showTooltip(tooltip, container, content, centerPoint(mark), mark);
+  });
+  mark.addEventListener("blur", () => {
+    clearActiveMarks(mark);
+    hideTooltip(tooltip);
+  });
+  mark.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setActiveMark(mark);
+    showTooltip(tooltip, container, content, { clientX: event.clientX, clientY: event.clientY }, mark);
+  });
+}
+
+function setActiveMark(mark) {
+  const chart = mark.closest("svg");
+  if (!chart) return;
+  chart.classList.add("has-active-mark");
+  chart.querySelectorAll(".chart-mark").forEach((node) => {
+    node.classList.toggle("is-active", node === mark);
+    node.classList.toggle("is-muted", node !== mark);
+  });
+}
+
+function clearActiveMarks(mark) {
+  const chart = mark.closest("svg");
+  if (!chart) return;
+  chart.classList.remove("has-active-mark");
+  chart.querySelectorAll(".chart-mark").forEach((node) => {
+    node.classList.remove("is-active", "is-muted");
+  });
+}
+
+function showTooltip(tooltip, container, content, point, mark) {
+  dismissOtherTooltips(tooltip, mark);
+  tooltip.innerHTML = tooltipHtml(content);
+  tooltip.hidden = false;
+  const anchor = Number.isFinite(point.clientX) ? point : centerPoint(mark);
+  window.requestAnimationFrame(() => {
+    const hostRect = container.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const rawX = anchor.clientX - hostRect.left + 12;
+    const rawY = anchor.clientY - hostRect.top - tipRect.height - 12;
+    const maxX = Math.max(8, hostRect.width - tipRect.width - 8);
+    const x = clamp(rawX, 8, maxX);
+    const y = rawY < 8 ? anchor.clientY - hostRect.top + 14 : rawY;
+    tooltip.style.left = `${round(x, 1)}px`;
+    tooltip.style.top = `${round(clamp(y, 8, Math.max(8, hostRect.height - tipRect.height - 8)), 1)}px`;
+  });
+}
+
+function hideTooltip(tooltip) {
+  tooltip.hidden = true;
+}
+
+function dismissOtherTooltips(activeTooltip, activeMark) {
+  document.querySelectorAll(".chart-tooltip").forEach((node) => {
+    if (node !== activeTooltip) node.hidden = true;
+  });
+  document.querySelectorAll("svg.has-active-mark").forEach((chart) => {
+    if (chart === activeMark.closest("svg")) return;
+    chart.classList.remove("has-active-mark");
+    chart.querySelectorAll(".chart-mark").forEach((node) => {
+      node.classList.remove("is-active", "is-muted");
+    });
+  });
+}
+
+function centerPoint(mark) {
+  const rect = mark.getBoundingClientRect();
+  return {
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char]);
+}
+
+function tooltipHtml({ title, kicker, rows = [], note = "" }) {
+  return `
+    <div class="chart-tooltip-kicker">${escapeHtml(kicker || "detail")}</div>
+    <strong>${escapeHtml(title)}</strong>
+    <dl>
+      ${rows.map(([label, value, tone]) => `
+        <div>
+          <dt>${escapeHtml(label)}</dt>
+          <dd class="${tone || ""}">${escapeHtml(value)}</dd>
+        </div>
+      `).join("")}
+    </dl>
+    ${note ? `<p>${escapeHtml(note)}</p>` : ""}
+  `;
+}
+
+function waterfallTooltip(item, start, end) {
+  if (item.type) {
+    return {
+      title: item.label,
+      kicker: item.type === "start" ? "baseline margin" : "current margin",
+      rows: [["Contribution margin", formatters.percent(item.value)]],
+      note: item.type === "start" ? "Prior 7-day modeled CM% before bridge drivers." : "Current filtered CM% after all bridge drivers."
+    };
+  }
+  return {
+    title: item.label,
+    kicker: item.value >= 0 ? "favorable driver" : "margin leakage driver",
+    rows: [
+      ["Impact", formatters.points(item.value), item.value >= 0 ? "good" : "bad"],
+      ["From", formatters.percent(start)],
+      ["To", formatters.percent(end)]
+    ],
+    note: item.driver || "Modeled operating driver."
+  };
+}
+
+function donutTooltip(row) {
+  return {
+    title: row.label,
+    kicker: "sales channel mix",
+    rows: [
+      ["Net sales", formatters.currency(row.value, true)],
+      ["Mix", formatters.percent(row.pct)],
+      ["Orders", formatters.number(row.orders)],
+      ["AOV", formatters.currency(row.orders ? row.value / row.orders : 0)]
+    ],
+    note: "Filtered contribution context uses the selected date, market, brand, and channel."
+  };
+}
+
+function forecastTooltip(row) {
+  return {
+    title: row.week,
+    kicker: "13-week rolling forecast",
+    rows: [
+      ["Base CM%", formatters.percent(row.baseMarginPct)],
+      ["Scenario CM%", formatters.percent(row.scenarioMarginPct), "good"],
+      ["Upside", formatters.points(row.scenarioMarginPct - row.baseMarginPct), "good"],
+      ["Revenue", formatters.currency(row.revenue, true)],
+      ["Orders", formatters.number(row.orders)],
+      ["COGS / Labor", `${formatters.currency(row.cogs, true)} / ${formatters.currency(row.labor, true)}`]
+    ],
+    note: "Scenario reflects the active direct mix, food cost, volume, labor, and refund controls."
+  };
+}
+
+function menuTooltip(row, value) {
+  return {
+    title: row.name,
+    kicker: row.brandName || "menu item economics",
+    rows: [
+      ["CM%", formatters.percent(value), value < 0.34 ? "bad" : value > 0.52 ? "good" : ""],
+      ["Unit CM", formatters.currency(row.unitContribution)],
+      ["Refund rate", formatters.percent(row.summary.refundRate), row.summary.refundRate > 0.035 ? "bad" : ""],
+      ["Volume rank", `#${row.volumeRank}`],
+      ["Recommendation", row.recommendation]
+    ],
+    note: `${row.category} item, modeled from filtered item-level operating rows.`
+  };
 }
 
 function linePath(points, className) {

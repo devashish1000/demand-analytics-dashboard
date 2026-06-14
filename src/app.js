@@ -347,12 +347,21 @@ function metricCard(label, current, previous, type, tone, inverse = false) {
   const delta = type === "percent" ? current - previous : (current - previous) / (previous || 1);
   const good = inverse ? delta < 0 : delta >= 0;
   const value = type === "currency" ? formatters.currency(current, true) : type === "percent" ? formatters.percent(current) : formatters.number(current);
+  const previousValue = type === "currency" ? formatters.currency(previous, true) : type === "percent" ? formatters.percent(previous) : formatters.number(previous);
   const deltaText = type === "percent" ? formatters.points(delta) : `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`;
   const trend = Array.from({ length: 16 }, (_, i) => current * (0.88 + Math.sin(i / 2 + label.length) * 0.03 + i * (good ? 0.008 : -0.005)));
   return `
     <article class="metric-card">
       <div><span>${label}</span><strong>${value}</strong><em class="${good ? "good" : "bad"}">${deltaText}</em> <small>vs prior 7 days</small></div>
-      <div class="spark-host" data-spark="${trend.join("|")}" data-tone="${good ? "good" : "bad"}"></div>
+      <div
+        class="spark-host"
+        data-spark="${trend.join("|")}"
+        data-tone="${good ? "good" : "bad"}"
+        data-spark-title="${escapeHtml(label)}"
+        data-spark-current="${escapeHtml(value)}"
+        data-spark-previous="${escapeHtml(previousValue)}"
+        data-spark-delta="${escapeHtml(deltaText)}"
+      ></div>
     </article>
   `;
 }
@@ -715,7 +724,13 @@ function renderCharts() {
   });
   document.querySelectorAll("[data-spark]").forEach((host) => {
     const values = host.dataset.spark.split("|").map(Number);
-    renderSparkline(host, values, { color: host.dataset.tone === "good" ? "#2f8a4d" : "#ef4b3d" });
+    renderSparkline(host, values, {
+      color: host.dataset.tone === "good" ? "#2f8a4d" : "#ef4b3d",
+      title: host.dataset.sparkTitle,
+      current: host.dataset.sparkCurrent,
+      previous: host.dataset.sparkPrevious,
+      delta: host.dataset.sparkDelta
+    });
   });
 }
 
