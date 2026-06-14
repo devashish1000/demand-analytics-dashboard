@@ -1,0 +1,113 @@
+export function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+  row.push(value);
+  if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+
+  const [headers, ...records] = rows;
+  if (!headers) return [];
+  return records.map((record) =>
+    Object.fromEntries(headers.map((header, index) => [normalizeHeader(header), coerce(record[index] || "")]))
+  );
+}
+
+export function toCsv(rows) {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  return [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join(","))
+  ].join("\n");
+}
+
+export function downloadText(filename, text, mime = "text/plain") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function validateUpload(kind, rows) {
+  const rules = {
+    orders: {
+      required: ["date", "location", "brand", "channel", "item", "quantity", "gross_sales"],
+      numeric: ["quantity", "gross_sales", "merchant_promo", "merchant_refund", "platform_fee", "food_cost", "packaging_cost", "labor_minutes"]
+    },
+    labor: {
+      required: ["date", "location", "actual_hours", "hourly_rate"],
+      numeric: ["scheduled_hours", "actual_hours", "hourly_rate", "payroll_burden_rate"]
+    },
+    forecast: {
+      required: ["week", "location", "revenue_forecast", "orders_forecast", "margin_forecast"],
+      numeric: ["revenue_forecast", "orders_forecast", "cogs_forecast", "labor_forecast", "margin_forecast"]
+    },
+    menu: {
+      required: ["brand", "item", "price", "food_cost", "packaging_cost"],
+      numeric: ["price", "food_cost", "packaging_cost", "labor_minutes"]
+    }
+  }[kind] || { required: [], numeric: [] };
+  const headers = new Set(Object.keys(rows[0] || {}));
+  const missing = rules.required.filter((field) => !headers.has(field));
+  const invalid = [];
+  rows.slice(0, 100).forEach((row, index) => {
+    rules.required.forEach((field) => {
+      if (row[field] === "" || row[field] == null) invalid.push(`row ${index + 2}: missing ${field}`);
+    });
+    rules.numeric.forEach((field) => {
+      if (headers.has(field) && row[field] !== "" && (typeof row[field] !== "number" || Number.isNaN(row[field]) || row[field] < 0)) {
+        invalid.push(`row ${index + 2}: invalid ${field}`);
+      }
+    });
+  });
+  return {
+    ok: missing.length === 0 && invalid.length === 0,
+    missing,
+    invalid,
+    rowCount: rows.length
+  };
+}
+
+function normalizeHeader(header) {
+  return String(header).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function escapeCell(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function coerce(value) {
+  const text = String(value).trim();
+  if (text === "") return "";
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  return text;
+}

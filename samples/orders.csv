@@ -1,0 +1,5 @@
+date,location,brand,channel,item,quantity,gross_sales,merchant_promo,merchant_refund,platform_fee,food_cost,packaging_cost,labor_minutes
+2026-05-11,Austin - South,moonbowls,delivery marketplace,Spicy Chicken Bowl,2,35.09,1.42,0,9.24,9.31,2.20,7.4
+2026-05-11,Chicago - West,xenia,direct order,Truffle Quinoa Bowl,1,19.21,0.34,0,1.04,6.02,1.16,4.3
+2026-05-11,LA - Culver City,hungry hibachi,pickup,Hibachi Steak Bowl,1,21.01,0.11,4.92,0.44,7.74,1.12,4.8
+2026-05-11,Dallas - North,thrive protein bowls,catering,Power Steak Bowl,4,87.26,0.00,0,7.53,28.84,4.60,18.4

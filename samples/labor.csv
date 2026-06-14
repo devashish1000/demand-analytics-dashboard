@@ -1,0 +1,5 @@
+date,location,scheduled_hours,actual_hours,hourly_rate,payroll_burden_rate
+2026-05-11,Austin - South,12.8,13.5,21.20,0.14
+2026-05-11,Chicago - West,11.9,12.4,21.20,0.14
+2026-05-11,LA - Culver City,13.7,15.1,23.50,0.14
+2026-05-11,Dallas - North,10.8,10.7,21.20,0.14

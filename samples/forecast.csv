@@ -1,0 +1,5 @@
+week,location,revenue_forecast,orders_forecast,cogs_forecast,labor_forecast,margin_forecast
+Week 1,Austin - South,18842,1072,4860,3190,3714
+Week 2,Austin - South,19031,1080,4915,3210,3788
+Week 3,Austin - South,19360,1102,5030,3225,3834
+Week 4,Austin - South,19615,1110,5090,3250,3906
