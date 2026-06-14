@@ -255,12 +255,21 @@ svg {
 .input,
 .mini-select,
 .status-select {
+  min-width: 0;
   border: 0;
   outline: 0;
   color: var(--ink);
   background: transparent;
   font-size: 12px;
   font-weight: 600;
+}
+
+.filter-control select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .filter-control:hover,
