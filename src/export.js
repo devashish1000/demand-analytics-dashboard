@@ -7,6 +7,7 @@ const DEFAULT_META = {
 };
 
 export function buildWeeklySummaryText(summary) {
+  const forecastWeek = summary.forecast.week || "latest week";
   return [
     `${summary.title} (${summary.period})`,
     "",
@@ -22,7 +23,7 @@ export function buildWeeklySummaryText(summary) {
     "Risks for next week",
     ...summary.risks.map((line) => `- ${line}`),
     "",
-    `Forecast update: base week-13 CM% ${formatters.percent(summary.forecast.base)}; scenario ${formatters.percent(summary.forecast.scenario)} (${formatters.points(summary.forecast.upside)} upside).`,
+    `Forecast update (${forecastWeek}): base ${formatters.percent(summary.forecast.base)}; scenario ${formatters.percent(summary.forecast.scenario)} (${formatters.points(summary.forecast.upside)} upside).`,
     "",
     "Disclosure: Sample modeled operating data; not actual Salted data."
   ].join("\n");
@@ -40,12 +41,13 @@ export async function copySummary(summary, notify) {
 }
 
 export function downloadSummary(summary) {
+  const forecastWeekLabel = summary.forecast.week || "week";
   exportWorkbook("salted-weekly-finance-summary.xls", {
     title: "Weekly Finance Summary",
     subtitle: summary.period,
     summaryCards: [
-      ["Base Week 13 CM%", formatters.percent(summary.forecast.base), "neutral"],
-      ["Scenario Week 13 CM%", formatters.percent(summary.forecast.scenario), "good"],
+      [`Base ${forecastWeekLabel} CM%`, formatters.percent(summary.forecast.base), "neutral"],
+      [`Scenario ${forecastWeekLabel} CM%`, formatters.percent(summary.forecast.scenario), "good"],
       ["Modeled Upside", formatters.points(summary.forecast.upside), "good"]
     ],
     sections: [
@@ -62,16 +64,75 @@ export function downloadSummary(summary) {
         { key: "note", label: "Operating Note", type: "longText", width: 420 }
       ],
       rows: [
-        { metric: "Base week-13 CM%", value: formatters.percent(summary.forecast.base), note: "Current modeled trajectory before scenario controls." },
-        { metric: "Scenario week-13 CM%", value: formatters.percent(summary.forecast.scenario), note: "Updated by current direct mix, food cost, labor, volume, and refund assumptions." },
+        { metric: `Base ${forecastWeekLabel} CM%`, value: formatters.percent(summary.forecast.base), note: "Current modeled trajectory before scenario controls." },
+        { metric: `Scenario ${forecastWeekLabel} CM%`, value: formatters.percent(summary.forecast.scenario), note: "Updated by current direct mix, food cost, labor, volume, and refund assumptions." },
         { metric: "Upside vs base", value: formatters.points(summary.forecast.upside), note: "Modeled contribution margin improvement opportunity." }
       ]
     }]
   });
 }
 
-export function exportRows(filename, rows) {
-  downloadText(filename, `\ufeff${toCsv(rows).replace(/\n/g, "\r\n")}`, "text/csv;charset=utf-8");
+const CSV_SCHEMAS = {
+  location: [
+    { key: "location", label: "Location" },
+    { key: "district", label: "District" },
+    { key: "market", label: "Market" },
+    { key: "net_sales", label: "Net Sales", format: "currency0" },
+    { key: "contribution_margin", label: "Contribution Margin", format: "currency0" },
+    { key: "margin_pct", label: "CM %", format: "percent1" },
+    { key: "delta_vs_prior", label: "Delta vs prior (pts)", format: "points1" },
+    { key: "risk", label: "Risk" },
+    { key: "top_driver", label: "Top Driver" },
+    { key: "risk_driver", label: "Risk + Driver" }
+  ],
+  menu: [
+    { key: "item", label: "Menu Item" },
+    { key: "brand", label: "Brand" },
+    { key: "price", label: "Price", format: "currency2" },
+    { key: "food_cost", label: "COGS", format: "currency2" },
+    { key: "packaging", label: "Packaging", format: "currency2" },
+    { key: "unit_contribution", label: "Unit Contribution", format: "currency2" },
+    { key: "margin_pct", label: "CM %", format: "percent1" },
+    { key: "refund_rate", label: "Refund Rate", format: "percent1" },
+    { key: "volume_rank", label: "Volume Rank", format: "number0" },
+    { key: "recommendation", label: "Recommendation" }
+  ],
+  forecast: [
+    { key: "week", label: "Week" },
+    { key: "revenue", label: "Revenue", format: "currency0" },
+    { key: "orders", label: "Orders", format: "number0" },
+    { key: "cogs", label: "COGS", format: "currency0" },
+    { key: "labor", label: "Labor", format: "currency0" },
+    { key: "base_margin_pct", label: "Base CM %", format: "percent1" },
+    { key: "scenario_margin_pct", label: "Scenario CM %", format: "percent1" },
+    { key: "upside_pts", label: "Upside", format: "points1" }
+  ],
+  actions: [
+    { key: "priority", label: "Priority" },
+    { key: "location", label: "Location" },
+    { key: "issue", label: "Issue" },
+    { key: "evidence", label: "Evidence" },
+    { key: "estimated_margin_impact_pts", label: "Estimated Margin Impact (pts)", format: "points1" },
+    { key: "owner", label: "Owner" },
+    { key: "status", label: "Status" },
+    { key: "due", label: "Due" }
+  ]
+};
+
+function inferSchema(filename) {
+  if (filename.includes("location-performance")) return CSV_SCHEMAS.location;
+  if (filename.includes("menu-margin")) return CSV_SCHEMAS.menu;
+  if (filename.includes("rolling-forecast")) return CSV_SCHEMAS.forecast;
+  if (filename.includes("operator-actions")) return CSV_SCHEMAS.actions;
+  return null;
+}
+
+export function exportRows(filename, rows, schema) {
+  downloadText(
+    filename,
+    `\ufeff${toCsv(rows, schema || inferSchema(filename)).replace(/\n/g, "\r\n")}`,
+    "text/csv;charset=utf-8"
+  );
 }
 
 export function exportWorkbook(filename, config) {
@@ -265,7 +326,11 @@ function dataCellXml(row, column, rowIndex) {
     return cellXml(formatCell(rawValue, type, column), style);
   }
   if (type === "currency" || type === "percent" || type === "number") {
-    return cellXml(Number(rawValue) || 0, style, "Number");
+    const numeric = toFiniteNumber(rawValue);
+    if (Number.isNaN(numeric)) {
+      return cellXml("", style);
+    }
+    return cellXml(numeric, style, "Number");
   }
   return cellXml(formatCell(rawValue, type, column), style);
 }
@@ -400,7 +465,12 @@ function labelize(key) {
 
 function numberValue(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? String(number) : "0";
+  return Number.isFinite(number) ? String(number) : "";
+}
+
+function toFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : Number.NaN;
 }
 
 function sheetTitle(title) {

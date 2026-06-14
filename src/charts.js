@@ -10,18 +10,37 @@ function svg(width, height, className = "chart") {
   return node;
 }
 
+function chartDimensions(container, fallbackWidth, fallbackHeight, maxHeight = null) {
+  const availableWidth = container.clientWidth;
+  const width = Math.max(220, Math.round(availableWidth || fallbackWidth));
+  const height = maxHeight ? Math.round((width / fallbackWidth) * fallbackHeight) : fallbackHeight;
+  return { width, height: Math.min(maxHeight ?? height, height) };
+}
+
 function resetChart(container) {
   container.replaceChildren();
   container.classList.add("interactive-chart-host");
-  const tooltip = document.createElement("div");
+  return globalTooltip();
+}
+
+function globalTooltip() {
+  let tooltip = document.querySelector("#chart-tooltip");
+  if (tooltip) return tooltip;
+  tooltip = document.createElement("div");
+  tooltip.id = "chart-tooltip";
   tooltip.className = "chart-tooltip";
   tooltip.hidden = true;
   tooltip.setAttribute("role", "status");
   tooltip.setAttribute("aria-live", "polite");
-  container.appendChild(tooltip);
-  container.onclick = (event) => {
-    if (!event.target.closest(".chart-mark")) hideTooltip(tooltip);
-  };
+  document.body.appendChild(tooltip);
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".chart-mark")) {
+      hideTooltip(tooltip);
+      clearAllActiveMarks();
+    }
+  });
+  window.addEventListener("resize", () => hideTooltip(tooltip));
+  window.addEventListener("scroll", () => hideTooltip(tooltip), true);
   return tooltip;
 }
 
@@ -95,21 +114,20 @@ export function renderSparkline(container, values, options = {}) {
   node.appendChild(hit);
   registerMark(hit, container, tooltip, {
     title: options.title || "Metric trend",
-    kicker: "prior 7 day movement",
+    kicker: options.comparison || "prior period movement",
     rows: [
       ["Current", options.current || formatters.currency(values.at(-1), true)],
       ["Prior", options.previous || "prior period"],
       ["Change", options.delta || "trend available"]
     ],
-    note: "Sparkline is modeled from the current dashboard filter."
+    note: "Sparkline reflects the selected dashboard filter."
   });
   container.appendChild(node);
 }
 
 export function renderWaterfall(container, bridge) {
   const tooltip = resetChart(container);
-  const width = 620;
-  const height = 264;
+  const { width, height } = chartDimensions(container, 620, 264);
   const pad = { top: 28, right: 22, bottom: 66, left: 46 };
   const node = svg(width, height, "chart waterfall-chart");
   const minValue = Math.min(...bridge.map((item) => item.type ? item.value : 0.14));
@@ -199,13 +217,29 @@ export function renderWaterfall(container, bridge) {
 
 export function renderDonut(container, rows) {
   const tooltip = resetChart(container);
-  const width = 260;
-  const height = 220;
-  const cx = 105;
-  const cy = 108;
-  const radius = 72;
-  const thickness = 34;
+  const { width, height } = chartDimensions(container, 260, 220);
+  const scale = width / 260;
+  const cx = Math.round(105 * scale);
+  const cy = Math.round(108 * scale);
+  const radius = Math.max(58, Math.round(72 * scale));
+  const thickness = Math.max(26, Math.round(34 * scale));
   const node = svg(width, height, "chart donut-chart");
+
+  if (!rows.length) {
+    node.appendChild(el("circle", {
+      cx,
+      cy,
+      r: radius,
+      fill: "none",
+      stroke: "#e6ebe8",
+      "stroke-width": thickness,
+      "stroke-dasharray": `${radius * 2}`
+    }));
+    node.appendChild(el("text", { x: cx, y: cy - 2, class: "axis-label donut-subtitle", "text-anchor": "middle" }, "No channel data"));
+    node.appendChild(el("text", { x: cx, y: cy + 16, class: "axis-label", "text-anchor": "middle" }, "for selected filters"));
+    container.appendChild(node);
+    return;
+  }
   let startAngle = -90;
 
   if (rows.length === 1 && rows[0].pct >= 0.999) {
@@ -250,15 +284,32 @@ export function renderDonut(container, rows) {
 
 export function renderForecast(container, series) {
   const tooltip = resetChart(container);
-  const width = 650;
-  const height = 290;
+  const { width, height } = chartDimensions(container, 650, 290, 290);
   const pad = { top: 22, right: 24, bottom: 38, left: 46 };
   const node = svg(width, height, "chart forecast-chart");
+  if (!series.length) {
+    node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: (height - pad.top - pad.bottom) / 2 + pad.top, y2: (height - pad.top - pad.bottom) / 2 + pad.top, class: "grid-line" }));
+    node.appendChild(el("text", {
+      x: width / 2,
+      y: (height - pad.top - pad.bottom) / 2 + pad.top - 10,
+      class: "axis-label",
+      "text-anchor": "middle"
+    }, "No forecast rows for selected filters"));
+    node.appendChild(el("text", {
+      x: width / 2,
+      y: (height - pad.top - pad.bottom) / 2 + pad.top + 10,
+      class: "axis-label",
+      "text-anchor": "middle"
+    }, "Adjust filters to reveal the forecast coverage"));
+    container.appendChild(node);
+    return;
+  }
   const values = series.flatMap((row) => [row.baseMarginPct, row.scenarioMarginPct]);
   const min = Math.min(0.1, ...values) - 0.01;
   const max = Math.max(0.3, ...values) + 0.01;
   const x = (index) => pad.left + (index / (series.length - 1)) * (width - pad.left - pad.right);
   const y = (value) => pad.top + (max - value) / (max - min) * (height - pad.top - pad.bottom);
+  const labelStep = Math.max(2, Math.round(series.length / 16));
 
   [0.1, 0.15, 0.2, 0.25, 0.3].forEach((tick) => {
     const tickY = y(tick);
@@ -300,7 +351,7 @@ export function renderForecast(container, series) {
   });
 
   series.forEach((row, index) => {
-    if (index % 2 === 0 || index === series.length - 1) {
+    if (index % labelStep === 0 || index === series.length - 1) {
       node.appendChild(el("text", { x: x(index), y: height - 12, class: "axis-label chart-x-label forecast-x-label", "text-anchor": "middle" }, `W${index + 1}`));
     }
   });
@@ -310,10 +361,26 @@ export function renderForecast(container, series) {
 
 export function renderBarTrend(container, rows, accessor, labelAccessor) {
   const tooltip = resetChart(container);
-  const width = 520;
-  const height = 246;
+  const { width, height } = chartDimensions(container, 520, 246);
   const pad = { top: 26, right: 54, bottom: 18, left: 154 };
   const node = svg(width, height, "chart bar-chart");
+  if (!rows.length) {
+    node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: height / 2, y2: height / 2, class: "grid-line" }));
+    node.appendChild(el("text", {
+      x: width / 2,
+      y: height / 2 - 10,
+      class: "axis-label",
+      "text-anchor": "middle"
+    }, "No menu data for these filters"));
+    node.appendChild(el("text", {
+      x: width / 2,
+      y: height / 2 + 10,
+      class: "axis-label",
+      "text-anchor": "middle"
+    }, "Refine the date, market, brand, or channel selection"));
+    container.appendChild(node);
+    return;
+  }
   const values = rows.map(accessor);
   const max = Math.max(...values, 0.5);
   const rowStep = (height - pad.top - pad.bottom) / rows.length;
@@ -401,21 +468,30 @@ function clearActiveMarks(mark) {
   });
 }
 
+function clearAllActiveMarks() {
+  document.querySelectorAll("svg.has-active-mark").forEach((chart) => {
+    chart.classList.remove("has-active-mark");
+    chart.querySelectorAll(".chart-mark").forEach((node) => {
+      node.classList.remove("is-active", "is-muted");
+    });
+  });
+}
+
 function showTooltip(tooltip, container, content, point, mark) {
   dismissOtherTooltips(tooltip, mark);
   tooltip.innerHTML = tooltipHtml(content);
   tooltip.hidden = false;
   const anchor = Number.isFinite(point.clientX) ? point : centerPoint(mark);
   window.requestAnimationFrame(() => {
-    const hostRect = container.getBoundingClientRect();
     const tipRect = tooltip.getBoundingClientRect();
-    const rawX = anchor.clientX - hostRect.left + 12;
-    const rawY = anchor.clientY - hostRect.top - tipRect.height - 12;
-    const maxX = Math.max(8, hostRect.width - tipRect.width - 8);
-    const x = clamp(rawX, 8, maxX);
-    const y = rawY < 8 ? anchor.clientY - hostRect.top + 14 : rawY;
+    const rawX = anchor.clientX + 14;
+    const rawY = anchor.clientY - tipRect.height - 12;
+    const maxX = Math.max(12, window.innerWidth - tipRect.width - 12);
+    const maxY = Math.max(12, window.innerHeight - tipRect.height - 12);
+    const x = clamp(rawX, 12, maxX);
+    const y = rawY < 12 ? anchor.clientY + 14 : rawY;
     tooltip.style.left = `${round(x, 1)}px`;
-    tooltip.style.top = `${round(clamp(y, 8, Math.max(8, hostRect.height - tipRect.height - 8)), 1)}px`;
+    tooltip.style.top = `${round(clamp(y, 12, maxY), 1)}px`;
   });
 }
 
@@ -512,7 +588,7 @@ function donutTooltip(row) {
 function forecastTooltip(row) {
   return {
     title: row.week,
-    kicker: "13-week rolling forecast",
+    kicker: "rolling forecast",
     rows: [
       ["Base CM%", formatters.percent(row.baseMarginPct)],
       ["Scenario CM%", formatters.percent(row.scenarioMarginPct), "good"],
@@ -570,14 +646,14 @@ function polar(cx, cy, r, angle) {
 
 function waterfallLabel(label) {
   const labels = {
-    "prior 7 days": ["prior 7", "days"],
+    "prior period": ["prior", "period"],
     "channel mix": ["channel", "mix"],
     "platform fees": ["platform", "fees"],
     refunds: ["refunds"],
     "COGS / food cost": ["COGS /", "food cost"],
     "labor efficiency": ["labor", "efficiency"],
     other: ["other"],
-    "current 7 days": ["current 7", "days"]
+    "current period": ["current", "period"]
   };
   return labels[label] || wrapWords(label, 10, 3);
 }

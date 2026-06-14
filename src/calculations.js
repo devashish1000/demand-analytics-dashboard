@@ -186,7 +186,7 @@ export function summarize(orders, labor = []) {
 
 export function comparePeriods(data, filters) {
   const current = filterData(data, filters);
-  const previousRange = shiftRange(filters.range, -7);
+  const previousRange = shiftRange(filters.range, -rangeLengthDays(filters.range));
   const previous = filterData(data, { ...filters, range: previousRange });
   return {
     current,
@@ -202,6 +202,13 @@ function shiftRange(range, days) {
     start: addDays(range.start, days),
     end: addDays(range.end, days)
   };
+}
+
+function rangeLengthDays(range) {
+  if (!range) return 7;
+  const start = new Date(`${range.start}T00:00:00`).getTime();
+  const end = new Date(`${range.end}T00:00:00`).getTime();
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
 }
 
 function addDays(date, days) {
@@ -227,10 +234,10 @@ export function varianceBridge(currentSummary, previousSummary) {
   ];
   const residual = end - start - rawDrivers.reduce((total, item) => total + item.value, 0);
   return [
-    { id: "start", label: "prior 7 days", value: start, type: "start" },
+    { id: "start", label: "prior period", value: start, type: "start" },
     ...rawDrivers,
     { id: "other", label: "other", value: residual, driver: "volume, AOV, and rounding effects" },
-    { id: "end", label: "current 7 days", value: end, type: "end" }
+    { id: "end", label: "current period", value: end, type: "end" }
   ];
 }
 
@@ -306,13 +313,20 @@ export function menuPerformance(data, filters) {
 }
 
 function recommendationForItem(summary, marginPct, orderCount) {
-  if (orderCount > 120 && marginPct < 0.35) return "reprice / reduce promo";
+  if (orderCount > 120 && marginPct < 0.37) return "reprice / reduce promo";
   if (summary.refundRate > 0.04) return "audit quality";
   if (marginPct > 0.55 && orderCount > 80) return "promote";
   return "monitor";
 }
 
-export function forecastSeries(data, filters, scenario = {}) {
+function forecastWeekIndex(label) {
+  const value = Number(String(label).replace(/\D+/g, ""));
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+export function forecastSeries(data, filters, scenario = {}, options = {}) {
+  const weeks = Number.isFinite(Number(options.forecastWeeks)) ? Number(options.forecastWeeks) : Number.MAX_SAFE_INTEGER;
+
   const locationIds = new Set(
     LOCATIONS.filter((location) =>
       matches(filters.market, location.market) &&
@@ -320,26 +334,41 @@ export function forecastSeries(data, filters, scenario = {}) {
       matches(filters.locationId, location.id)
     ).map((location) => location.id)
   );
+  const baseActual = filterData(data, { ...filters, brandId: "all", channelId: "all" });
+  const segmentActual = filterData(data, filters);
+  const baseSummary = summarize(baseActual.orders, baseActual.labor);
+  const segmentSummary = summarize(segmentActual.orders, segmentActual.labor);
+  const revenueShare = boundedShare(segmentSummary.netSales, baseSummary.netSales);
+  const orderShare = boundedShare(segmentSummary.orderCount, baseSummary.orderCount);
+  const cogsShare = boundedShare(segmentSummary.foodCost, baseSummary.foodCost);
+  const laborShare = boundedShare(segmentSummary.laborExpense, baseSummary.laborExpense);
+  const segmentMarginOffset = clamp(segmentSummary.marginPct - baseSummary.marginPct, -0.22, 0.22);
   const grouped = groupBy(data.forecast.filter((row) => locationIds.has(row.locationId)), (row) => row.week);
-  const scenarioDirectLift = Number(scenario.directMixLift || 0) / 100;
+  const scenarioDirectLift = matches(filters.channelId, "all") ? Number(scenario.directMixLift || 0) / 100 : 0;
   const scenarioFoodInflation = Number(scenario.foodInflation || 0) / 100;
   const scenarioVolumeGrowth = Number(scenario.volumeGrowth || 0) / 100;
   const scenarioLaborEfficiency = Number(scenario.laborEfficiency || 0) / 100;
   const scenarioRefundReduction = Number(scenario.refundReduction || 0) / 100;
 
-  return Object.entries(grouped).map(([week, rows], index) => {
-    const revenue = sum(rows, (row) => row.revenueForecast) * (1 + scenarioVolumeGrowth);
-    const baseRevenue = sum(rows, (row) => row.revenueForecast);
-    const orders = sum(rows, (row) => row.ordersForecast) * (1 + scenarioVolumeGrowth);
-    const cogs = sum(rows, (row) => row.cogsForecast) * (1 + scenarioFoodInflation);
-    const labor = sum(rows, (row) => row.laborForecast) * (1 - scenarioLaborEfficiency);
-    const baseMargin = sum(rows, (row) => row.marginForecast);
+  const orderedWeeks = Object.entries(grouped).sort(([left], [right]) => forecastWeekIndex(left) - forecastWeekIndex(right));
+
+  return orderedWeeks.slice(0, Math.max(1, Math.min(weeks, orderedWeeks.length))).map(([week, rows], index) => {
+    const revenue = sum(rows, (row) => row.revenueForecast) * revenueShare * (1 + scenarioVolumeGrowth);
+    const baseRevenue = sum(rows, (row) => row.revenueForecast) * revenueShare;
+    const orders = sum(rows, (row) => row.ordersForecast) * orderShare * (1 + scenarioVolumeGrowth);
+    const cogs = sum(rows, (row) => row.cogsForecast) * cogsShare * (1 + scenarioFoodInflation);
+    const baseCogs = sum(rows, (row) => row.cogsForecast) * cogsShare;
+    const labor = sum(rows, (row) => row.laborForecast) * laborShare * (1 - scenarioLaborEfficiency);
+    const baseLabor = sum(rows, (row) => row.laborForecast) * laborShare;
+    const aggregateMarginPct = safeDivide(sum(rows, (row) => row.marginForecast), sum(rows, (row) => row.revenueForecast));
+    const baseMarginPct = clamp(aggregateMarginPct + segmentMarginOffset, -0.05, 0.62);
+    const baseMargin = baseRevenue * baseMarginPct;
     const scenarioMargin =
       baseMargin +
       revenue * scenarioDirectLift * 0.17 +
       revenue * scenarioRefundReduction * 0.8 -
-      (cogs - sum(rows, (row) => row.cogsForecast)) -
-      (labor - sum(rows, (row) => row.laborForecast));
+      (cogs - baseCogs) -
+      (labor - baseLabor);
     return {
       week,
       index: index + 1,
@@ -349,7 +378,7 @@ export function forecastSeries(data, filters, scenario = {}) {
       labor,
       baseMargin,
       scenarioMargin,
-      baseMarginPct: safeDivide(baseMargin, baseRevenue),
+      baseMarginPct,
       scenarioMarginPct: safeDivide(scenarioMargin, revenue),
       confidenceLow: sum(rows, (row) => row.confidenceLow),
       confidenceHigh: sum(rows, (row) => row.confidenceHigh)
@@ -357,24 +386,27 @@ export function forecastSeries(data, filters, scenario = {}) {
   });
 }
 
-export function weeklySummary(data, filters, scenario) {
+export function weeklySummary(data, filters, scenario, options = {}) {
   const { currentSummary, previousSummary } = comparePeriods(data, filters);
   const bridge = varianceBridge(currentSummary, previousSummary);
   const drivers = bridge
     .filter((item) => !item.type)
     .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
     .slice(0, 3);
-  const forecast = forecastSeries(data, filters, scenario);
+  const forecast = forecastSeries(data, filters, scenario, {
+    forecastWeeks: options.forecastWeeks
+  });
   const week13 = forecast.at(-1);
+  const forecastWeek = forecast.length ? `week ${forecast.length}` : "upcoming week";
   const actions = data.actions.filter((action) => actionLocationMatches(action, filters));
   const next = actions.length
     ? actions.slice(0, 3).map((action) => `${action.issue} (${formatters.points(action.estimatedImpactPts / 100)} modeled impact).`)
     : ["No operator action is scoped to the current filter; monitor variance drivers before assigning field work."];
   return {
     title: "Weekly finance summary",
-    period: "May 5 - May 11, 2026",
+    period: formatRange(filters.range),
     changed: [
-      `Net sales ${deltaText(currentSummary.netSales, previousSummary.netSales)} vs prior week.`,
+      `Net sales ${deltaText(currentSummary.netSales, previousSummary.netSales)} vs ${comparisonNoun(filters.range)}.`,
       `Contribution margin moved ${formatters.points(currentSummary.marginPct - previousSummary.marginPct)} to ${formatters.percent(currentSummary.marginPct)}.`,
       `Direct-order mix is ${formatters.percent(currentSummary.directOrderMix)} (${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)}).`
     ],
@@ -386,6 +418,7 @@ export function weeklySummary(data, filters, scenario) {
       laborRiskLine(filters)
     ],
     forecast: {
+      week: forecastWeek,
       base: week13?.baseMarginPct || 0,
       scenario: week13?.scenarioMarginPct || 0,
       upside: (week13?.scenarioMarginPct || 0) - (week13?.baseMarginPct || 0)
@@ -397,6 +430,29 @@ function laborRiskLine(filters) {
   if (filters.market && filters.market !== "all") return `Weekend labor availability is below target in ${filters.market}.`;
   if (filters.district && filters.district !== "all") return `Weekend labor availability is below target in ${filters.district}.`;
   return "Weekend labor availability is below target in LA and Austin.";
+}
+
+function comparisonNoun(range) {
+  return rangeLengthDays(range) === 7 ? "prior week" : "the prior comparable period";
+}
+
+function formatRange(range) {
+  if (!range) return "May 5 - May 11, 2026";
+  const start = new Date(`${range.start}T00:00:00`);
+  const end = new Date(`${range.end}T00:00:00`);
+  const includeStartYear = start.getFullYear() !== end.getFullYear();
+  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(includeStartYear ? { year: "numeric" } : {}) });
+  const endLabel = end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} - ${endLabel}`;
+}
+
+function boundedShare(numerator, denominator) {
+  if (!denominator) return 1;
+  return Math.min(1, Math.max(0.015, numerator / denominator));
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function deltaText(current, previous) {

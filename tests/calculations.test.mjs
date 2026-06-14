@@ -80,8 +80,8 @@ const forecast = forecastSeries(data, filters, {
   laborEfficiency: 1,
   refundReduction: 0.7
 });
-assert.equal(forecast.length, 13, "forecast should return 13 weeks");
-assert.ok(forecast.at(-1).scenarioMarginPct > forecast.at(-1).baseMarginPct, "recommended scenario should improve week 13 margin");
+assert.equal(forecast.length, 104, "forecast should return 104 weeks");
+assert.ok(forecast.at(-1).scenarioMarginPct > forecast.at(-1).baseMarginPct, "recommended scenario should improve final week margin");
 
 const summaryText = weeklySummary(data, filters, {
   directMixLift: 5,
@@ -97,5 +97,7 @@ const csv = toCsv([{ date: "2026-05-11", location: "Austin - South", brand: "moo
 const parsed = parseCsv(csv);
 assert.equal(parsed[0].gross_sales, 34.4, "CSV parser should coerce numeric fields");
 assert.equal(validateUpload("orders", parsed).ok, true, "sample order CSV should validate");
+const formulaSafeCsv = toCsv([{ date: "2026-05-11", gross_sales: 34.4, location: "=Austin - South", channel: "+Direct" }]);
+assert.ok(/'=Austin - South/.test(formulaSafeCsv) && /'\+Direct/.test(formulaSafeCsv), "CSV exporter should neutralize formula-like values");
 
 console.log("calculation smoke tests passed");

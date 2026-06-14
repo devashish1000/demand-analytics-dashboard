@@ -19,10 +19,25 @@ const app = document.querySelector("#app");
 const sampleData = createSampleData();
 const storedActions = JSON.parse(localStorage.getItem("salted-actions") || "{}");
 
+const DATE_RANGES = {
+  current: { start: "2026-05-05", end: "2026-05-11", label: "May 5 - May 11, 2026" },
+  prior: { start: "2026-04-28", end: "2026-05-04", label: "Apr 28 - May 4, 2026" },
+  last4: { start: "2026-04-14", end: "2026-05-11", label: "Last 4 weeks" },
+  last8: { start: "2026-03-17", end: "2026-05-11", label: "Last 8 weeks" },
+  last13: { start: "2026-02-10", end: "2026-05-11", label: "Last 13 weeks" },
+  last26: { start: "2025-11-11", end: "2026-05-11", label: "Last 26 weeks" },
+  last52: { start: "2025-05-13", end: "2026-05-11", label: "Last 52 weeks" },
+  last78: { start: "2024-11-12", end: "2026-05-11", label: "Last 78 weeks" },
+  last104: { start: "2024-05-14", end: "2026-05-11", label: "Last 104 weeks" }
+};
+
+const DATE_OPTIONS = Object.entries(DATE_RANGES).map(([key, range]) => [key, range.label]);
+const FORECAST_WEEK_OPTIONS = [8, 13, 26, 52, 78, 104];
+
 const state = {
   view: "overview",
   filters: {
-    range: { start: "2026-05-05", end: "2026-05-11" },
+    range: rangeForKey("current"),
     market: "all",
     district: "all",
     locationId: "all",
@@ -38,6 +53,7 @@ const state = {
   },
   scenarioPreset: "custom",
   menuSort: "marginAsc",
+  forecastWeeks: 104,
   uploadRows: [],
   uploadKind: "orders",
   toast: ""
@@ -77,7 +93,7 @@ function render() {
       </div>
       <nav class="nav-list" aria-label="Primary">
         ${nav.map((item) => `
-          <button class="nav-item ${state.view === item.id ? "active" : ""}" data-view="${item.id}">
+          <button class="nav-item ${state.view === item.id ? "active" : ""}" data-view="${item.id}" aria-label="${item.label}" title="${item.label}">
             ${icon(item.icon)}
             <span>${item.label}</span>
           </button>
@@ -108,23 +124,102 @@ function render() {
     <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
   `;
   bindShellEvents();
-  renderCharts();
+  window.requestAnimationFrame(() => {
+    try {
+      renderCharts();
+    } catch (error) {
+      console.error("Chart render failed", error);
+    }
+  });
+}
+
+function hydrateStateFromUrl() {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  if (view && nav.some((item) => item.id === view)) {
+    state.view = view;
+  }
+
+  const rangeKey = params.get("range");
+  if (rangeKey && DATE_OPTIONS.some(([key]) => key === rangeKey)) {
+    state.filters.range = rangeForKey(rangeKey);
+  }
+
+  const rangeStart = params.get("rangeStart");
+  const rangeEnd = params.get("rangeEnd");
+  if (rangeStart && rangeEnd && /^\d{4}-\d{2}-\d{2}$/.test(rangeStart) && /^\d{4}-\d{2}-\d{2}$/.test(rangeEnd)) {
+    state.filters.range = { start: rangeStart, end: rangeEnd };
+  }
+
+  const forecastWeeks = Number(params.get("forecastWeeks"));
+  if (Number.isFinite(forecastWeeks) && FORECAST_WEEK_OPTIONS.includes(forecastWeeks)) {
+    state.forecastWeeks = forecastWeeks;
+  }
+
+  const filters = [
+    ["market", "all", ["market"]],
+    ["district", "all", ["district"]],
+    ["locationId", "all", ["location", "locationId"]],
+    ["brandId", "all", ["brand", "brandId"]],
+    ["channelId", "all", ["channel", "channelId"]]
+  ];
+  filters.forEach(([key, fallback, paramNames]) => {
+    const value = paramNames.map((param) => params.get(param)).find(Boolean);
+    if (value) state.filters[key] = value;
+    if (!state.filters[key]) state.filters[key] = fallback;
+  });
+
+  const validMarkets = new Set(LOCATIONS.map((location) => location.market));
+  const validDistricts = new Set(
+    LOCATIONS
+      .filter((location) => state.filters.market === "all" || location.market === state.filters.market)
+      .map((location) => location.district)
+  );
+  const validLocations = new Set(
+    LOCATIONS
+      .filter((location) =>
+        (state.filters.market === "all" || location.market === state.filters.market) &&
+        (state.filters.district === "all" || location.district === state.filters.district)
+      )
+      .map((location) => location.id)
+  );
+  const validBrands = new Set(BRANDS.map((brand) => brand.id));
+  const validChannels = new Set(CHANNELS.map((channel) => channel.id));
+
+  if (!validMarkets.has(state.filters.market)) state.filters.market = "all";
+  if (!validDistricts.has(state.filters.district)) state.filters.district = "all";
+  if (!validLocations.has(state.filters.locationId)) state.filters.locationId = "all";
+  if (!validBrands.has(state.filters.brandId)) state.filters.brandId = "all";
+  if (!validChannels.has(state.filters.channelId)) state.filters.channelId = "all";
+  if (state.filters.locationId !== "all" && locationById[state.filters.locationId]) {
+    state.filters.market = locationById[state.filters.locationId].market;
+    state.filters.district = locationById[state.filters.locationId].district;
+  }
+  state.filters = {
+    ...state.filters,
+    market: state.filters.market || "all",
+    district: state.filters.district || "all",
+    locationId: state.filters.locationId || "all",
+    brandId: state.filters.brandId || "all",
+    channelId: state.filters.channelId || "all"
+  };
 }
 
 function renderTopbar() {
+  const districts = districtOptionsForFilters(state.filters);
+  const locations = locationOptionsForFilters(state.filters);
+  const showForecastWeeks = ["overview", "forecast", "summary", "actions"].includes(state.view);
   return `
     <header class="topbar">
       <div class="filters">
-        ${selectControl("date range", "range", rangeKey(), [
-          ["current", "May 5 - May 11, 2026"],
-          ["prior", "Apr 28 - May 4, 2026"],
-          ["all", "Last 14 days"]
-        ])}
+        ${selectControl("date range", "range", rangeKey(), DATE_OPTIONS)}
         ${selectControl("market", "market", state.filters.market, [["all", "all"], ...uniqueOptions(LOCATIONS, "market")])}
-        ${selectControl("district", "district", state.filters.district, [["all", "all"], ...uniqueOptions(LOCATIONS, "district")])}
-        ${selectControl("location", "locationId", state.filters.locationId, [["all", "all"], ...LOCATIONS.map((l) => [l.id, l.name])])}
+        ${selectControl("district", "district", state.filters.district, [["all", "all"], ...districts.map((district) => [district, district])])}
+        ${selectControl("location", "locationId", state.filters.locationId, [["all", "all"], ...locations.map((l) => [l.id, l.name])])}
         ${selectControl("brand", "brandId", state.filters.brandId, [["all", "all"], ...BRANDS.map((b) => [b.id, b.name])])}
         ${selectControl("channel", "channelId", state.filters.channelId, [["all", "all"], ...CHANNELS.map((c) => [c.id, c.name])])}
+        ${showForecastWeeks ? selectControl("forecast horizon", "forecastWeeks", String(state.forecastWeeks), FORECAST_WEEK_OPTIONS.map((weeks) => [String(weeks), `${weeks}-week`])) : ""}
       </div>
       <div class="top-actions">
         <span class="fresh-dot"></span>
@@ -157,25 +252,34 @@ function renderOverview() {
   const bridge = varianceBridge(currentSummary, previousSummary);
   const locations = locationPerformance(sampleData, state.filters);
   const actions = currentActions();
-  const summary = weeklySummary({ ...sampleData, actions }, state.filters, state.scenario);
-  const forecast = forecastSeries(sampleData, state.filters, state.scenario);
+  const summary = weeklySummary(
+    { ...sampleData, actions },
+    state.filters,
+    state.scenario,
+    { forecastWeeks: state.forecastWeeks }
+  );
+  const forecast = forecastSeries(sampleData, state.filters, state.scenario, {
+    forecastWeeks: state.forecastWeeks
+  });
   const menuRows = menuPerformance(sampleData, state.filters);
   const mixRows = channelMix(comparison.current.orders);
   const attentionRows = locations.filter((location) => location.risk !== "low");
+  const hasCurrentActivity = comparison.current.orders.length > 0;
+  const comparisonText = comparisonLabel();
 
   return `
     <div class="metric-row">
-      ${metricCard("net sales", currentSummary.netSales, previousSummary.netSales, "currency", "bad")}
-      ${metricCard("contribution margin", currentSummary.contributionMargin, previousSummary.contributionMargin, "currency", "good")}
-      ${metricCard("contribution margin %", currentSummary.marginPct, previousSummary.marginPct, "percent", "bad")}
-      ${metricCard("orders", currentSummary.orderCount, previousSummary.orderCount, "number", "bad")}
-      ${metricCard("direct-order mix", currentSummary.directOrderMix, previousSummary.directOrderMix, "percent", "good")}
-      ${metricCard("refund rate", currentSummary.refundRate, previousSummary.refundRate, "percent", "bad", true)}
+      ${metricCard("net sales", currentSummary.netSales, previousSummary.netSales, "currency", "bad", false, comparisonText)}
+      ${metricCard("contribution margin", currentSummary.contributionMargin, previousSummary.contributionMargin, "currency", "good", false, comparisonText)}
+      ${metricCard("contribution margin %", currentSummary.marginPct, previousSummary.marginPct, "percent", "bad", false, comparisonText)}
+      ${metricCard("orders", currentSummary.orderCount, previousSummary.orderCount, "number", "bad", false, comparisonText)}
+      ${metricCard("direct-order mix", currentSummary.directOrderMix, previousSummary.directOrderMix, "percent", "good", false, comparisonText)}
+      ${metricCard("refund rate", currentSummary.refundRate, previousSummary.refundRate, "percent", "bad", true, comparisonText)}
     </div>
     <div class="dashboard-grid overview-grid">
       <article class="panel span-5">
         <div class="panel-header">
-          <div><h2>margin variance bridge <span>(contribution margin %)</span></h2><p>vs prior 7 days</p></div>
+          <div><h2>margin variance bridge <span>(contribution margin %)</span></h2><p>${comparisonText}</p></div>
           ${icon("info")}
         </div>
         <div id="waterfall" class="chart-host"></div>
@@ -192,15 +296,18 @@ function renderOverview() {
           <div id="donut" class="chart-host"></div>
           ${channelLegend(mixRows)}
         </div>
-        <div class="note-line">${icon("search")} Direct-order mix ${currentSummary.directOrderMix > previousSummary.directOrderMix ? "improved" : "declined"} ${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)} vs prior 7 days.</div>
+        <div class="note-line">${icon("search")} Direct-order mix ${currentSummary.directOrderMix > previousSummary.directOrderMix ? "improved" : "declined"} ${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)} ${comparisonText}.</div>
       </article>
       <article class="panel span-3">
-        <div class="panel-header"><div><h2>locations needing attention <span class="badge danger">${attentionRows.length}</span></h2></div><button class="link-btn" data-view="pnl">view all</button></div>
-        ${attentionList(attentionRows.slice(0, 4))}
+        <div class="panel-header">
+          <div><h2>locations needing attention <span class="badge danger">${attentionRows.length}</span></h2></div>
+          <button class="link-btn" data-view="pnl">view all</button>
+        </div>
+        ${attentionList(attentionRows.slice(0, 4), hasCurrentActivity)}
       </article>
       <article class="panel span-5">
         <div class="panel-header">
-          <div><h2>13-week rolling forecast</h2><p>actual, base forecast, and scenario</p></div>
+          <div><h2>${forecast.length ? `${forecast.length}-week rolling forecast` : "rolling forecast"}</h2><p>actual, base forecast, and scenario</p></div>
           <select class="mini-select" data-scenario-preset>
             <option value="custom" ${state.scenarioPreset === "custom" ? "selected" : ""}>scenario</option>
             <option value="base" ${state.scenarioPreset === "base" ? "selected" : ""}>base</option>
@@ -214,7 +321,10 @@ function renderOverview() {
         </div>
       </article>
       <article class="panel span-4">
-        <div class="panel-header"><div><h2>operator action queue <span class="badge danger">${actions.filter((a) => a.status !== "done").length}</span></h2></div><button class="link-btn" data-view="actions">view all</button></div>
+        <div class="panel-header">
+          <div><h2>operator action queue <span class="badge danger">${actions.filter((a) => a.status !== "done").length}</span></h2></div>
+          <button class="link-btn" data-view="actions">view all</button>
+        </div>
         ${compactActionList(actions.slice(0, 5))}
       </article>
       <article class="panel span-3">
@@ -232,12 +342,15 @@ function renderPnl() {
   const comparison = comparePeriods(sampleData, state.filters);
   const locations = locationPerformance(sampleData, state.filters);
   const bridge = varianceBridge(comparison.currentSummary, comparison.previousSummary);
+  const locationPanel = locations.length
+    ? locationTable(locations, false)
+    : emptyState("No location activity found for this filter set.");
   return `
     <div class="section-heading"><div><h1>location + district P&L</h1><p>Transparent contribution margin by market, location, channel, and controllable cost driver.</p></div>${exportButton("location-performance")}</div>
     <div class="dashboard-grid">
       <article class="panel span-8"><div class="panel-header"><div><h2>variance bridge</h2><p>Current period vs prior period</p></div></div><div id="pnl-waterfall" class="chart-host large"></div></article>
       <article class="panel span-4">${driverStack(bridge)}</article>
-      <article class="panel span-12"><div class="panel-header"><div><h2>location operating table</h2><p>Risk uses CM%, margin movement, and refund spikes.</p></div></div>${locationTable(locations, false)}</article>
+      <article class="panel span-12"><div class="panel-header"><div><h2>location operating table</h2><p>Risk uses CM%, margin movement, and refund spikes.</p></div></div>${locationPanel}</article>
     </div>
   `;
 }
@@ -245,6 +358,9 @@ function renderPnl() {
 function renderMenu() {
   let rows = menuPerformance(sampleData, state.filters);
   rows = sortMenu(rows);
+  const menuPanel = rows.length
+    ? menuTable(rows)
+    : emptyState("No menu rows match the selected filters.");
   return `
     <div class="section-heading"><div><h1>menu item margin waterfall</h1><p>Find high-volume low-margin items, refund-heavy items, and promotion candidates.</p></div>${exportButton("menu-margin")}</div>
     <div class="menu-hero panel">
@@ -258,15 +374,18 @@ function renderMenu() {
     </div>
     <div class="dashboard-grid">
       <article class="panel span-5"><div class="panel-header"><div><h2>margin by item</h2><p>Net contribution before store labor</p></div></div><div id="menu-bars" class="chart-host"></div></article>
-      <article class="panel span-7"><div class="panel-header"><div><h2>item economics</h2><p>Price, COGS, packaging, fees, and recommendations.</p></div></div>${menuTable(rows)}</article>
+      <article class="panel span-7"><div class="panel-header"><div><h2>item economics</h2><p>Price, COGS, packaging, fees, and recommendations.</p></div></div>${menuPanel}</article>
     </div>
   `;
 }
 
 function renderForecastView() {
-  const series = forecastSeries(sampleData, state.filters, state.scenario);
+  const series = forecastSeries(sampleData, state.filters, state.scenario, {
+    forecastWeeks: state.forecastWeeks
+  });
+  const weekSpan = series.length || 0;
   return `
-    <div class="section-heading"><div><h1>rolling forecast</h1><p>13-week forecast with scenario controls for direct mix, food cost, volume, labor, and refund improvement.</p></div>${exportButton("rolling-forecast")}</div>
+    <div class="section-heading"><div><h1>rolling forecast</h1><p>${weekSpan ? `${weekSpan}-week` : "long-horizon"} forecast with scenario controls for direct mix, food cost, volume, labor, and refund improvement.</p></div>${exportButton("rolling-forecast")}</div>
     <div class="dashboard-grid">
       <article class="panel span-8"><div class="panel-header"><div><h2>base vs scenario CM%</h2><p>Modeled trajectory from current sample operating drivers.</p></div></div><div id="forecast-detail-chart" class="chart-host large"></div></article>
       <article class="panel span-4">${scenarioControls(series)}</article>
@@ -277,14 +396,22 @@ function renderForecastView() {
 
 function renderActions() {
   const actions = currentActions();
+  const actionsPanel = actions.length ? actionTable(actions, true) : emptyState("No actions match the current filter set.");
   return `
     <div class="section-heading"><div><h1>operator action queue</h1><p>Modeled evidence actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions")}</div>
-    <article class="panel">${actionTable(actions, true)}</article>
+    <div class="dashboard-grid">
+      <article class="panel span-12">${actionsPanel}</article>
+    </div>
   `;
 }
 
 function renderSummary() {
-  const summary = weeklySummary({ ...sampleData, actions: currentActions() }, state.filters, state.scenario);
+  const summary = weeklySummary(
+    { ...sampleData, actions: currentActions() },
+    state.filters,
+    state.scenario,
+    { forecastWeeks: state.forecastWeeks }
+  );
   return `
     <div class="section-heading"><div><h1>weekly finance summary</h1><p>A send-ready internal summary for finance, operations, and market leaders.</p></div><div class="section-actions"><button class="utility-btn" data-action="copy-summary">${icon("copy")} copy summary</button><button class="primary-btn" data-action="download-summary">${icon("download")} Excel report</button></div></div>
     <div class="dashboard-grid">
@@ -339,20 +466,25 @@ function renderDictionary() {
   ];
   return `
     <div class="section-heading"><div><h1>data dictionary</h1><p>Finance definitions are visible so operators can trust the recommendations.</p></div></div>
-    <article class="panel">${simpleDefinitionTable(formulas)}</article>
+    <div class="dashboard-grid">
+      <article class="panel span-12">${simpleDefinitionTable(formulas)}</article>
+    </div>
   `;
 }
 
-function metricCard(label, current, previous, type, tone, inverse = false) {
-  const delta = type === "percent" ? current - previous : (current - previous) / (previous || 1);
-  const good = inverse ? delta < 0 : delta >= 0;
+function metricCard(label, current, previous, type, tone, inverse = false, comparisonText = "vs prior period") {
+  const hasComparablePeriod = type === "percent" || previous > 0;
+  const delta = type === "percent" ? current - previous : (previous > 0 ? (current - previous) / previous : 0);
+  const good = hasComparablePeriod ? (inverse ? delta < 0 : delta >= 0) : false;
   const value = type === "currency" ? formatters.currency(current, true) : type === "percent" ? formatters.percent(current) : formatters.number(current);
   const previousValue = type === "currency" ? formatters.currency(previous, true) : type === "percent" ? formatters.percent(previous) : formatters.number(previous);
-  const deltaText = type === "percent" ? formatters.points(delta) : `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`;
+  const deltaText = hasComparablePeriod
+    ? (type === "percent" ? formatters.points(delta) : `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`)
+    : "N/A";
   const trend = Array.from({ length: 16 }, (_, i) => current * (0.88 + Math.sin(i / 2 + label.length) * 0.03 + i * (good ? 0.008 : -0.005)));
   return `
     <article class="metric-card">
-      <div><span>${label}</span><strong>${value}</strong><em class="${good ? "good" : "bad"}">${deltaText}</em> <small>vs prior 7 days</small></div>
+      <div><span>${label}</span><strong>${value}</strong><em class="${good ? "good" : hasComparablePeriod ? "bad" : "muted"}">${deltaText}</em> <small>${comparisonText}</small></div>
       <div
         class="spark-host"
         data-spark="${trend.join("|")}"
@@ -361,6 +493,7 @@ function metricCard(label, current, previous, type, tone, inverse = false) {
         data-spark-current="${escapeHtml(value)}"
         data-spark-previous="${escapeHtml(previousValue)}"
         data-spark-delta="${escapeHtml(deltaText)}"
+        data-spark-comparison="${escapeHtml(comparisonText)}"
       ></div>
     </article>
   `;
@@ -373,17 +506,18 @@ function channelLegend(rows) {
   return `
     <div class="legend-list">
       ${rows.map((row) => `
-        <div class="legend-row">
+        <div class="legend-row" title="${row.label} · ${formatters.number(row.orders)} orders · ${formatters.percent(row.pct)} · ${formatters.currency(row.value, true)}">
           <span class="legend-dot" style="background:${row.color}" aria-hidden="true"></span>
           <div class="legend-copy">
             <div class="legend-title">
               <strong>${row.label}</strong>
-              <small>${formatters.number(row.orders)} orders</small>
             </div>
             <div class="legend-values">
-              <em>${formatters.percent(row.pct)}</em>
-              <span class="legend-divider">·</span>
-              <span>${formatters.currency(row.value, true)}</span>
+              <span class="legend-pct">${formatters.percent(row.pct)}</span>
+              <span class="legend-divider" aria-hidden="true">·</span>
+              <span class="legend-amount">${formatters.currency(row.value, true)}</span>
+              <span class="legend-divider" aria-hidden="true">·</span>
+              <span class="legend-order">${formatters.number(row.orders)} orders</span>
             </div>
           </div>
         </div>
@@ -412,13 +546,15 @@ function locationTable(rows, compact) {
   `;
 }
 
-function attentionList(rows) {
+function attentionList(rows, hasCurrentActivity = true) {
   if (!rows.length) {
+    const title = hasCurrentActivity ? "No locations above watch threshold." : "No location activity in selected filters.";
+    const detail = hasCurrentActivity ? "Current filters are inside normal margin and refund bands." : "Broaden or adjust filters to show active locations.";
     return `
       <div class="attention-list">
         <div class="attention-empty">
-          <strong>No locations above watch threshold.</strong>
-          <span>Current filters are inside normal margin and refund bands.</span>
+          <strong>${title}</strong>
+          <span>${detail}</span>
         </div>
       </div>
     `;
@@ -429,7 +565,7 @@ function attentionList(rows) {
         <div class="attention-row">
           <div class="attention-main">
             <strong>${row.name}</strong>
-            <span>${row.district} · ${row.manager}</span>
+            <span class="attention-meta"><span>${row.district}</span> <span>·</span> <span>${row.manager}</span></span>
             <small>${row.topDriver?.driver || "stable operating mix"}</small>
           </div>
           <div class="attention-metrics">
@@ -503,13 +639,20 @@ function menuTable(rows) {
 }
 
 function forecastTable(series) {
+  if (!series.length) {
+    return `
+      <div class="panel-header">
+        <div><h2>forecast detail</h2><p>No forecast rows match the selected filters.</p></div>
+      </div>
+      <div class="empty-state"><strong>No forecast data yet</strong><span>Adjust filters to a location/brand/channel that has forecast history.</span></div>
+    `;
+  }
   return `
-    <article class="panel"><div class="panel-header"><div><h2>forecast detail</h2><p>Base and scenario margin by week.</p></div></div>
+    <div class="panel-header"><div><h2>forecast detail</h2><p>Base and scenario margin by week.</p></div></div>
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>week</th><th>revenue</th><th>orders</th><th>COGS</th><th>labor</th><th>base CM%</th><th>scenario CM%</th><th>upside</th></tr></thead>
         <tbody>${series.map((row) => `<tr><td><strong>${row.week}</strong></td><td>${formatters.currency(row.revenue, true)}</td><td>${formatters.number(row.orders)}</td><td>${formatters.currency(row.cogs, true)}</td><td>${formatters.currency(row.labor, true)}</td><td>${formatters.percent(row.baseMarginPct)}</td><td class="good">${formatters.percent(row.scenarioMarginPct)}</td><td class="good">${formatters.points(row.scenarioMarginPct - row.baseMarginPct)}</td></tr>`).join("")}</tbody>
       </table></div>
-    </article>
   `;
 }
 
@@ -566,13 +709,23 @@ function forecastUpdate(summary) {
   return `
     <div class="forecast-card">
       <span>forecast update</span>
-      <strong>week 13 CM%</strong>
+      <strong>${summary.forecast.week || "Week forecast"} CM%</strong>
       <dl><dt>base</dt><dd>${formatters.percent(summary.forecast.base)}</dd><dt>scenario</dt><dd class="good">${formatters.percent(summary.forecast.scenario)}</dd><dt>upside</dt><dd class="good">${formatters.points(summary.forecast.upside)}</dd></dl>
     </div>
   `;
 }
 
 function menuSpotlight(rows) {
+  if (!rows.length) {
+    return `
+      <div class="menu-spotlight">
+        <div class="empty-state">
+          <strong>No menu activity for this filter</strong>
+          <span>Choose a wider date range, market, or channel to preview top-performing and risk items.</span>
+        </div>
+      </div>
+    `;
+  }
   const spotlight = [...rows].sort((a, b) => b.summary.quantity - a.summary.quantity).slice(0, 5);
   return `
     <div class="menu-spotlight">
@@ -598,6 +751,12 @@ function driverStack(bridge) {
 }
 
 function scenarioControls(series) {
+  if (!series.length) {
+    return `
+      <div class="panel-header"><div><h2>scenario controls</h2><p>No forecast rows for this selection.</p></div></div>
+      <div class="scenario-empty">${icon("info")} Select another market/district/location or channel with forecast coverage.</div>
+    `;
+  }
   const last = series.at(-1);
   const controls = [
     ["directMixLift", "direct-order mix lift", "%", 0, 12],
@@ -613,15 +772,23 @@ function scenarioControls(series) {
         <label><span>${label}<em>${state.scenario[key]}${unit}</em></span><input type="range" min="${min}" max="${max}" step="0.1" value="${state.scenario[key]}" data-scenario="${key}" /></label>
       `).join("")}
     </div>
-    <div class="scenario-result"><span>week 13 scenario CM%</span><strong>${formatters.percent(last.scenarioMarginPct)}</strong><em>${formatters.points(last.scenarioMarginPct - last.baseMarginPct)} vs base</em></div>
+    <div class="scenario-result"><span>week ${series.length} scenario CM%</span><strong>${formatters.percent(last.scenarioMarginPct)}</strong><em>${formatters.points(last.scenarioMarginPct - last.baseMarginPct)} vs base</em></div>
   `;
 }
 
 function forecastCard(series) {
+  if (!series.length) {
+    return `
+      <div class="forecast-side">
+        <span>${series.length ? `${series.length}-week forecast` : "forecast"}</span>
+        <div class="forecast-empty">No forecast rows for this filter slice.</div>
+      </div>
+    `;
+  }
   const last = series.at(-1);
   return `
     <div class="forecast-side">
-      <span>week 13 forecast</span>
+      <span>week ${series.length} forecast</span>
       <dl><dt>base scenario</dt><dd>${formatters.percent(last.baseMarginPct)}</dd><dt>scenario</dt><dd class="good">${formatters.percent(last.scenarioMarginPct)}</dd></dl>
       <strong class="good">↑ ${formatters.points(last.scenarioMarginPct - last.baseMarginPct)}</strong>
       <button class="link-btn" data-view="forecast">view scenarios</button>
@@ -708,8 +875,12 @@ function renderCharts() {
   const comparison = comparePeriods(sampleData, state.filters);
   const bridge = varianceBridge(comparison.currentSummary, comparison.previousSummary);
   const mix = channelMix(comparison.current.orders);
-  const forecast = forecastSeries(sampleData, state.filters, state.scenario);
-  const menuRows = menuPerformance(sampleData, state.filters).slice(0, 8);
+  const hasForecastChart = document.getElementById("forecast-chart") || document.getElementById("forecast-detail-chart");
+  const hasMenuChart = document.getElementById("menu-bars");
+  const forecast = hasForecastChart ? forecastSeries(sampleData, state.filters, state.scenario, {
+    forecastWeeks: state.forecastWeeks
+  }) : [];
+  const menuRows = hasMenuChart ? menuPerformance(sampleData, state.filters).slice(0, 8) : [];
   const charts = [
     ["waterfall", (node) => renderWaterfall(node, bridge)],
     ["pnl-waterfall", (node) => renderWaterfall(node, bridge)],
@@ -729,34 +900,55 @@ function renderCharts() {
       title: host.dataset.sparkTitle,
       current: host.dataset.sparkCurrent,
       previous: host.dataset.sparkPrevious,
-      delta: host.dataset.sparkDelta
+      delta: host.dataset.sparkDelta,
+      comparison: host.dataset.sparkComparison
     });
   });
 }
 
 function updateFilter(key, value) {
   if (key === "range") {
-    state.filters.range =
-      value === "current" ? { start: "2026-05-05", end: "2026-05-11" } :
-      value === "prior" ? { start: "2026-04-28", end: "2026-05-04" } :
-      { start: "2026-04-28", end: "2026-05-11" };
+    state.filters.range = rangeForKey(value);
+  } else if (key === "forecastWeeks") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && FORECAST_WEEK_OPTIONS.includes(parsed)) {
+      state.forecastWeeks = parsed;
+    }
   } else {
     state.filters[key] = value;
     if (key === "market") {
       state.filters.district = "all";
       state.filters.locationId = "all";
     }
+    if (key === "district") {
+      state.filters.locationId = "all";
+    }
+    if (key === "locationId" && value !== "all") {
+      const location = locationById[value];
+      if (location) {
+        state.filters.market = location.market;
+        state.filters.district = location.district;
+      }
+    }
   }
   render();
 }
 
 function handleAction(action) {
-  const summary = weeklySummary({ ...sampleData, actions: currentActions() }, state.filters, state.scenario);
+  const summary = weeklySummary(
+    { ...sampleData, actions: currentActions() },
+    state.filters,
+    state.scenario,
+    { forecastWeeks: state.forecastWeeks }
+  );
   const locations = locationPerformance(sampleData, state.filters);
   const menuRows = menuPerformance(sampleData, state.filters);
-  const forecast = forecastSeries(sampleData, state.filters, state.scenario);
+  const forecast = forecastSeries(sampleData, state.filters, state.scenario, {
+    forecastWeeks: state.forecastWeeks
+  });
   if (action === "reset") {
-    state.filters = { range: { start: "2026-05-05", end: "2026-05-11" }, market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
+    state.filters = { range: rangeForKey("current"), market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
+    state.forecastWeeks = 104;
     notify("Filters reset.");
     render();
   }
@@ -785,6 +977,7 @@ function exportButton(baseName) {
 }
 
 function workbookConfig(kind, rows, summary) {
+  const forecastWeekLabel = summary.forecast?.week || "Rolling Forecast";
   const configs = {
     location: {
       title: "Location + District P&L",
@@ -817,7 +1010,7 @@ function workbookConfig(kind, rows, summary) {
       ]
     },
     forecast: {
-      title: "13-Week Rolling Forecast",
+      title: `${forecastWeekLabel} Rolling Forecast`,
       tableTitle: "Forecast Detail",
       columns: [
         { key: "week", label: "Week", type: "text", width: 90 },
@@ -852,7 +1045,7 @@ function workbookConfig(kind, rows, summary) {
     rows,
     summaryCards: [
       ["Rows", formatters.number(rows.length), "neutral"],
-      ["Scenario Week 13 CM%", formatters.percent(summary.forecast.scenario), "good"],
+      [`Scenario ${summary.forecast.week || "Week"} CM%`, formatters.percent(summary.forecast.scenario), "good"],
       ["Modeled Upside", formatters.points(summary.forecast.upside), "good"]
     ]
   };
@@ -887,7 +1080,7 @@ function detectUploadKind(filename, fallback) {
 
 function downloadSamples() {
   const { orderRows, laborRows } = toSampleCsv(sampleData);
-  const forecastRows = sampleData.forecast.slice(0, 12).map((row) => ({
+  const forecastRows = sampleData.forecast.map((row) => ({
     week: row.week,
     location: locationById[row.locationId].name,
     revenue_forecast: row.revenueForecast,
@@ -938,7 +1131,7 @@ function downloadSamples() {
           },
           {
             dataset: "Forecast",
-            purpose: "13-week revenue, order, COGS, labor, and margin targets.",
+            purpose: "104-week revenue, order, COGS, labor, and margin targets.",
             required_fields: "week, location, revenue forecast, orders forecast, COGS forecast, labor forecast, margin forecast",
             format_note: "Weekly rows by location."
           },
@@ -1052,9 +1245,40 @@ function sortMenu(rows) {
 }
 
 function rangeKey() {
-  if (state.filters.range.start === "2026-04-28" && state.filters.range.end === "2026-05-04") return "prior";
-  if (state.filters.range.start === "2026-04-28" && state.filters.range.end === "2026-05-11") return "all";
-  return "current";
+  return Object.entries(DATE_RANGES).find(([, range]) =>
+    state.filters.range.start === range.start && state.filters.range.end === range.end
+  )?.[0] || "current";
+}
+
+function rangeForKey(key) {
+  const range = DATE_RANGES[key] || DATE_RANGES.current;
+  return { start: range.start, end: range.end };
+}
+
+function rangeLengthDays(range = state.filters.range) {
+  const start = new Date(`${range.start}T00:00:00`).getTime();
+  const end = new Date(`${range.end}T00:00:00`).getTime();
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
+}
+
+function comparisonLabel() {
+  const days = rangeLengthDays();
+  return days === 7 ? "vs prior 7 days" : `vs prior ${days} days`;
+}
+
+function districtOptionsForFilters(filters) {
+  return [...new Set(
+    LOCATIONS
+      .filter((location) => matchesFilter(filters.market, location.market))
+      .map((location) => location.district)
+  )];
+}
+
+function locationOptionsForFilters(filters) {
+  return LOCATIONS.filter((location) =>
+    matchesFilter(filters.market, location.market) &&
+    matchesFilter(filters.district, location.district)
+  );
 }
 
 function locationMatchesFilters(location, filters) {
@@ -1095,7 +1319,8 @@ function formatShortDate(date) {
 function periodLabel() {
   const start = new Date(`${state.filters.range.start}T00:00:00`);
   const end = new Date(`${state.filters.range.end}T00:00:00`);
-  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const includeStartYear = start.getFullYear() !== end.getFullYear();
+  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(includeStartYear ? { year: "numeric" } : {}) });
   const endLabel = end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return `${startLabel} - ${endLabel}`;
 }
@@ -1171,4 +1396,5 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
 }
 
+hydrateStateFromUrl();
 render();

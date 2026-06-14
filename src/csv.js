@@ -35,13 +35,14 @@ export function parseCsv(text) {
   );
 }
 
-export function toCsv(rows) {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]);
-  return [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join(","))
-  ].join("\n");
+export function toCsv(rows, schema = null) {
+  const columns = schema?.length ? schema : Object.keys(rows[0] || {}).map((key) => ({ key, label: key }));
+  if (!columns.length) return "";
+  const headers = columns.map((column) => escapeCell(column.label));
+  const body = rows.length
+    ? rows.map((row) => columns.map((column) => escapeCell(formatCell(row[column.key], column.format))).join(","))
+    : [];
+  return [headers.join(","), ...body].join("\n");
 }
 
 export function downloadText(filename, text, mime = "text/plain") {
@@ -102,7 +103,28 @@ function normalizeHeader(header) {
 
 function escapeCell(value) {
   const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  const trimmed = text.trimStart();
+  const startsWithFormulaSign = /^[=+\-@]/.test(trimmed);
+  const startsWithUnsafeWhitespace = /^[\r\n\t]/.test(text);
+  const needsQuote = /[",\r\n\t]/.test(text);
+  const safeValue = startsWithFormulaSign || startsWithUnsafeWhitespace ? `'${text}` : text;
+  const escaped = safeValue.replaceAll('"', '""');
+  return needsQuote || /[",\r\n\t]/.test(safeValue) ? `"${escaped}"` : escaped;
+}
+
+function formatCell(value, format = "text") {
+  const amount = typeof value === "string" && value.trim() === "" ? "" : value;
+  if (amount === "") return "";
+  const number = typeof amount === "number" ? amount : Number(amount);
+  if (typeof number !== "number" || Number.isNaN(number)) return amount;
+  if (format === "number0") return Math.round(number).toLocaleString("en-US");
+  if (format === "percent0") return `${(number * 100).toFixed(0)}%`;
+  if (format === "percent1") return `${(number * 100).toFixed(1)}%`;
+  if (format === "currency0") return `$${Math.round(number).toLocaleString("en-US")}`;
+  if (format === "currency2") return `$${(Math.round(number * 100) / 100).toFixed(2)}`;
+  if (format === "points1") return `${number >= 0 ? "+" : ""}${(number * 100).toFixed(1)} pts`;
+  if (format === "text") return amount;
+  return amount;
 }
 
 function coerce(value) {

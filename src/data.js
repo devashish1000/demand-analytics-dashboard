@@ -1,5 +1,8 @@
-const START = new Date("2026-04-28T00:00:00");
+const START = new Date("2024-05-13T00:00:00");
 const DAY_MS = 86400000;
+const DATA_DAYS = 729;
+const RECENT_PRESSURE_START = DATA_DAYS - 7;
+const FORECAST_WEEKS = 104;
 
 export const LOCATIONS = [
   { id: "aus-south", name: "Austin - South", market: "Austin", district: "ATX", manager: "Priya Shah", opened: "2025-08-11", capacity: "high" },
@@ -148,7 +151,7 @@ function weightedPick(items, random) {
 
 function channelWeights(locationId, dayOffset) {
   const directLift = ["mia-beach", "phx-central", "den-rino"].includes(locationId) ? 0.04 : 0;
-  const marketplacePressure = ["aus-south", "chi-west", "la-culver"].includes(locationId) && dayOffset > 7 ? 0.08 : 0;
+  const marketplacePressure = ["aus-south", "chi-west", "la-culver"].includes(locationId) && dayOffset >= RECENT_PRESSURE_START ? 0.08 : 0;
   return [
     { value: "marketplace", weight: 54 + marketplacePressure * 100 },
     { value: "direct", weight: 14 + directLift * 100 },
@@ -161,8 +164,66 @@ function locationDailyBase(location, dayOffset) {
   const capacity = location.capacity === "high" ? 1.22 : location.capacity === "pilot" ? 0.72 : 0.98;
   const weekend = [5, 6].includes((dayOffset + 2) % 7) ? 1.13 : 1;
   const seasonal = 1 + Math.sin((dayOffset + location.id.length) / 6) * 0.06;
-  const pressure = ["aus-south", "chi-west", "la-culver"].includes(location.id) && dayOffset >= 7 ? 0.96 : 1.02;
+  const pressure = ["aus-south", "chi-west", "la-culver"].includes(location.id) && dayOffset >= RECENT_PRESSURE_START ? 0.96 : 1.02;
   return 46 * capacity * weekend * seasonal * pressure;
+}
+
+function itemForBrand(brandId, day, channelId, locationId) {
+  const items = MENU_ITEMS.filter((item) => item.brand === brandId);
+  const index = (day + channelId.length + locationId.length) % items.length;
+  return items[index];
+}
+
+function buildOrder(day, location, index, channelId, item, random) {
+  const channel = channelById[channelId];
+  const quantity = random() > 0.89 ? 2 : 1;
+  const daypart = weightedPick(
+    [
+      { value: "lunch", weight: 45 },
+      { value: "dinner", weight: 43 },
+      { value: "late", weight: 12 }
+    ],
+    random
+  );
+  const priceModifier = channelId === "catering" ? 1.08 : channelId === "direct" ? 0.99 : 1.02;
+  const grossSales = round(item.price * quantity * priceModifier);
+  const discountRate = channelId === "marketplace" ? 0.035 + random() * 0.03 : channelId === "direct" ? 0.018 : 0.01;
+  const merchantPromo = round(grossSales * discountRate);
+  const platformPromoFunding = round(channelId === "marketplace" ? grossSales * (random() > 0.86 ? 0.022 : 0) : 0);
+  const refundStress = ["aus-south", "chi-west"].includes(location.id) && day >= RECENT_PRESSURE_START && daypart === "dinner" ? 0.035 : 0.012;
+  const refundMerchant = round(random() < refundStress ? grossSales * (0.45 + random() * 0.45) : 0);
+  const refundPlatform = round(random() < 0.006 ? grossSales * 0.35 : 0);
+  const platformFee = round(channel.commission * grossSales + channel.fixed * quantity);
+  const paymentFee = round(channel.payment * grossSales);
+  const foodInflation = item.category.includes("protein") || item.category === "hibachi" ? 1.045 : 1.018;
+  const wasteFactor = ["la-culver", "dal-north"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.04 : 1;
+  const foodCost = round(item.foodCost * quantity * foodInflation * wasteFactor);
+  const packagingCost = round(item.packaging * quantity * (channelId === "marketplace" ? 1.08 : 1));
+
+  return {
+    id: `ord-${day}-${location.id}-${index}`,
+    date: isoDate(day),
+    week: weekLabel(day),
+    locationId: location.id,
+    brandId: item.brand,
+    channelId,
+    itemId: item.id,
+    quantity,
+    daypart,
+    grossSales,
+    discount: round(grossSales * 0.006),
+    merchantPromo,
+    platformPromoFunding,
+    refundMerchant,
+    refundPlatform,
+    taxCollected: round(grossSales * 0.0825),
+    tipsCollected: round(channelId === "direct" ? grossSales * 0.06 : grossSales * 0.025),
+    platformFee,
+    paymentFee,
+    foodCost,
+    packagingCost,
+    laborMinutes: round(item.laborMinutes * quantity * (daypart === "late" ? 1.07 : 1), 1)
+  };
 }
 
 export function createSampleData() {
@@ -170,11 +231,13 @@ export function createSampleData() {
   const orders = [];
   const labor = [];
 
-  for (let day = 0; day < 14; day += 1) {
+  for (let day = 0; day < DATA_DAYS; day += 1) {
     for (const location of LOCATIONS) {
       const dailyTarget = Math.max(18, Math.round(locationDailyBase(location, day) + random() * 12));
-      const laborBase = dailyTarget * (location.capacity === "high" ? 0.14 : 0.17);
-      const laborVariance = ["la-culver", "hou-midtown"].includes(location.id) && day >= 7 ? 1.09 : 1;
+      const coverageTarget = CHANNELS.length * BRANDS.length;
+      const projectedOrders = dailyTarget + coverageTarget;
+      const laborBase = projectedOrders * (location.capacity === "high" ? 0.14 : 0.17);
+      const laborVariance = ["la-culver", "hou-midtown"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.09 : 1;
       const hourlyRate = location.market === "Los Angeles" ? 23.5 : location.market === "Miami" ? 20.4 : 21.2;
       labor.push({
         date: isoDate(day),
@@ -185,6 +248,15 @@ export function createSampleData() {
         payrollBurdenRate: 0.14
       });
 
+      let orderIndex = 0;
+      for (const channel of CHANNELS) {
+        for (const brand of BRANDS) {
+          const item = itemForBrand(brand.id, day, channel.id, location.id);
+          orders.push(buildOrder(day, location, orderIndex, channel.id, item, random));
+          orderIndex += 1;
+        }
+      }
+
       for (let i = 0; i < dailyTarget; i += 1) {
         const channelId = weightedPick(channelWeights(location.id, day), random);
         const item = weightedPick(
@@ -194,55 +266,8 @@ export function createSampleData() {
           })),
           random
         );
-        const channel = channelById[channelId];
-        const quantity = random() > 0.89 ? 2 : 1;
-        const daypart = weightedPick(
-          [
-            { value: "lunch", weight: 45 },
-            { value: "dinner", weight: 43 },
-            { value: "late", weight: 12 }
-          ],
-          random
-        );
-        const priceModifier = channelId === "catering" ? 1.08 : channelId === "direct" ? 0.99 : 1.02;
-        const grossSales = round(item.price * quantity * priceModifier);
-        const discountRate = channelId === "marketplace" ? 0.035 + random() * 0.03 : channelId === "direct" ? 0.018 : 0.01;
-        const merchantPromo = round(grossSales * discountRate);
-        const platformPromoFunding = round(channelId === "marketplace" ? grossSales * (random() > 0.86 ? 0.022 : 0) : 0);
-        const refundStress = ["aus-south", "chi-west"].includes(location.id) && day >= 7 && daypart === "dinner" ? 0.035 : 0.012;
-        const refundMerchant = round(random() < refundStress ? grossSales * (0.45 + random() * 0.45) : 0);
-        const refundPlatform = round(random() < 0.006 ? grossSales * 0.35 : 0);
-        const platformFee = round(channel.commission * grossSales + channel.fixed * quantity);
-        const paymentFee = round(channel.payment * grossSales);
-        const foodInflation = item.category.includes("protein") || item.category === "hibachi" ? 1.045 : 1.018;
-        const wasteFactor = ["la-culver", "dal-north"].includes(location.id) && day >= 7 ? 1.04 : 1;
-        const foodCost = round(item.foodCost * quantity * foodInflation * wasteFactor);
-        const packagingCost = round(item.packaging * quantity * (channelId === "marketplace" ? 1.08 : 1));
-
-        orders.push({
-          id: `ord-${day}-${location.id}-${i}`,
-          date: isoDate(day),
-          week: weekLabel(day),
-          locationId: location.id,
-          brandId: item.brand,
-          channelId,
-          itemId: item.id,
-          quantity,
-          daypart,
-          grossSales,
-          discount: round(grossSales * 0.006),
-          merchantPromo,
-          platformPromoFunding,
-          refundMerchant,
-          refundPlatform,
-          taxCollected: round(grossSales * 0.0825),
-          tipsCollected: round(channelId === "direct" ? grossSales * 0.06 : grossSales * 0.025),
-          platformFee,
-          paymentFee,
-          foodCost,
-          packagingCost,
-          laborMinutes: round(item.laborMinutes * quantity * (daypart === "late" ? 1.07 : 1), 1)
-        });
+        orders.push(buildOrder(day, location, orderIndex, channelId, item, random));
+        orderIndex += 1;
       }
     }
   }
@@ -264,7 +289,7 @@ export function createForecast(orders, labor) {
   const random = seededRandom(1847);
   const byLocation = groupBy(orders, (order) => order.locationId);
   const laborByLocation = groupBy(labor, (row) => row.locationId);
-  const weeks = Array.from({ length: 13 }, (_, index) => index + 1);
+  const weeks = Array.from({ length: FORECAST_WEEKS }, (_, index) => index + 1);
 
   return LOCATIONS.flatMap((location) => {
     const locationOrders = byLocation[location.id] || [];
