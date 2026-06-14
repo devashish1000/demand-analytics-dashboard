@@ -17,6 +17,21 @@ function el(name, attrs = {}, text = "") {
   return node;
 }
 
+function multilineText(parent, lines, attrs = {}, lineHeight = 10) {
+  const node = el("text", attrs);
+  lines.filter(Boolean).forEach((line, index) => {
+    node.appendChild(
+      el(
+        "tspan",
+        { x: attrs.x, dy: index === 0 ? 0 : lineHeight },
+        line
+      )
+    );
+  });
+  parent.appendChild(node);
+  return node;
+}
+
 export function renderSparkline(container, values, options = {}) {
   container.replaceChildren();
   const width = options.width || 128;
@@ -48,10 +63,9 @@ export function renderSparkline(container, values, options = {}) {
 export function renderWaterfall(container, bridge) {
   container.replaceChildren();
   const width = 620;
-  const height = 250;
-  const pad = { top: 26, right: 22, bottom: 48, left: 46 };
+  const height = 264;
+  const pad = { top: 28, right: 22, bottom: 66, left: 46 };
   const node = svg(width, height, "chart waterfall-chart");
-  const max = Math.max(...bridge.map((item) => Math.abs(item.value)), 0.3);
   const minValue = Math.min(...bridge.map((item) => item.type ? item.value : 0.14));
   const maxValue = Math.max(...bridge.map((item) => item.type ? item.value : 0.3), 0.3);
   const yScale = (value) => {
@@ -63,7 +77,7 @@ export function renderWaterfall(container, bridge) {
   [0.15, 0.2, 0.25, 0.3].forEach((tick) => {
     const y = yScale(tick);
     node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: y, y2: y, class: "grid-line" }));
-    node.appendChild(el("text", { x: 12, y: y + 4, class: "axis-label" }, formatters.percent(tick, 0)));
+    node.appendChild(el("text", { x: 12, y: y + 4, class: "axis-label axis-y-label" }, formatters.percent(tick, 0)));
   });
 
   let cursor = bridge[0].value;
@@ -101,11 +115,16 @@ export function renderWaterfall(container, bridge) {
         item.type ? formatters.percent(item.value) : formatters.points(item.value)
       )
     );
-    node.appendChild(
-      el("text", { x: x + barWidth / 2, y: height - 24, class: "axis-label", "text-anchor": "middle" }, splitLabel(item.label)[0])
-    );
-    node.appendChild(
-      el("text", { x: x + barWidth / 2, y: height - 10, class: "axis-label", "text-anchor": "middle" }, splitLabel(item.label)[1] || "")
+    multilineText(
+      node,
+      waterfallLabel(item.label),
+      {
+        x: x + barWidth / 2,
+        y: height - 38,
+        class: "axis-label chart-x-label",
+        "text-anchor": "middle"
+      },
+      10
     );
   });
 
@@ -131,7 +150,7 @@ export function renderDonut(container, rows) {
   });
 
   node.appendChild(el("text", { x: cx, y: cy - 4, class: "donut-center", "text-anchor": "middle" }, formatters.currency(rows.reduce((sum, row) => sum + row.value, 0), true)));
-  node.appendChild(el("text", { x: cx, y: cy + 18, class: "axis-label", "text-anchor": "middle" }, "net sales"));
+  node.appendChild(el("text", { x: cx, y: cy + 18, class: "axis-label donut-subtitle", "text-anchor": "middle" }, "net sales"));
   container.appendChild(node);
 }
 
@@ -150,7 +169,7 @@ export function renderForecast(container, series) {
   [0.1, 0.15, 0.2, 0.25, 0.3].forEach((tick) => {
     const tickY = y(tick);
     node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: tickY, y2: tickY, class: "grid-line" }));
-    node.appendChild(el("text", { x: 10, y: tickY + 4, class: "axis-label" }, formatters.percent(tick, 0)));
+    node.appendChild(el("text", { x: 10, y: tickY + 4, class: "axis-label axis-y-label" }, formatters.percent(tick, 0)));
   });
 
   node.appendChild(linePath(series.map((row, index) => [x(index), y(row.baseMarginPct)]), "forecast-base"));
@@ -159,7 +178,7 @@ export function renderForecast(container, series) {
 
   series.forEach((row, index) => {
     if (index % 2 === 0 || index === series.length - 1) {
-      node.appendChild(el("text", { x: x(index), y: height - 12, class: "axis-label", "text-anchor": "middle" }, `W${index + 1}`));
+      node.appendChild(el("text", { x: x(index), y: height - 12, class: "axis-label chart-x-label forecast-x-label", "text-anchor": "middle" }, `W${index + 1}`));
     }
   });
 
@@ -169,26 +188,33 @@ export function renderForecast(container, series) {
 export function renderBarTrend(container, rows, accessor, labelAccessor) {
   container.replaceChildren();
   const width = 520;
-  const height = 220;
-  const pad = { top: 18, right: 16, bottom: 56, left: 44 };
+  const height = 246;
+  const pad = { top: 26, right: 54, bottom: 18, left: 154 };
   const node = svg(width, height, "chart bar-chart");
   const values = rows.map(accessor);
-  const max = Math.max(...values, 1);
-  const step = (width - pad.left - pad.right) / rows.length;
+  const max = Math.max(...values, 0.5);
+  const rowStep = (height - pad.top - pad.bottom) / rows.length;
+  const usableWidth = width - pad.left - pad.right;
 
-  [0.1, 0.2, 0.3].forEach((tick) => {
-    const y = pad.top + (1 - tick / max) * (height - pad.top - pad.bottom);
-    node.appendChild(el("line", { x1: pad.left, x2: width - pad.right, y1: y, y2: y, class: "grid-line" }));
+  [0.3, 0.4, 0.5].forEach((tick) => {
+    const tickX = pad.left + (tick / max) * usableWidth;
+    node.appendChild(el("line", { x1: tickX, x2: tickX, y1: pad.top - 6, y2: height - pad.bottom, class: "grid-line" }));
+    node.appendChild(el("text", { x: tickX, y: 14, class: "axis-label menu-scale-label", "text-anchor": "middle" }, formatters.percent(tick, 0)));
   });
 
   rows.forEach((row, index) => {
     const value = accessor(row);
-    const h = (value / max) * (height - pad.top - pad.bottom);
-    const x = pad.left + index * step + 8;
-    const y = height - pad.bottom - h;
-    node.appendChild(el("rect", { x, y, width: step - 16, height: h, rx: 3, class: value < 0.34 ? "bar-bad" : value > 0.52 ? "bar-good" : "bar-neutral" }));
-    node.appendChild(el("text", { x: x + (step - 16) / 2, y: height - 34, class: "axis-label", "text-anchor": "middle" }, splitLabel(labelAccessor(row))[0]));
-    node.appendChild(el("text", { x: x + (step - 16) / 2, y: height - 19, class: "axis-label", "text-anchor": "middle" }, splitLabel(labelAccessor(row))[1] || ""));
+    const barWidth = Math.max(3, (value / max) * usableWidth);
+    const y = pad.top + index * rowStep + rowStep / 2;
+    node.appendChild(
+      el(
+        "text",
+        { x: 8, y: y + 4, class: "axis-label menu-item-label" },
+        truncateLabel(labelAccessor(row), 23)
+      )
+    );
+    node.appendChild(el("rect", { x: pad.left, y: y - 7, width: barWidth, height: 14, rx: 3, class: value < 0.34 ? "bar-bad" : value > 0.52 ? "bar-good" : "bar-neutral" }));
+    node.appendChild(el("text", { x: pad.left + barWidth + 7, y: y + 4, class: value < 0.34 ? "value-label bad menu-value-label" : "value-label menu-value-label" }, formatters.percent(value)));
   });
 
   container.appendChild(node);
@@ -222,9 +248,36 @@ function polar(cx, cy, r, angle) {
   };
 }
 
-function splitLabel(label) {
-  const words = String(label).split(" ");
-  if (words.length <= 2) return [label];
-  const midpoint = Math.ceil(words.length / 2);
-  return [words.slice(0, midpoint).join(" "), words.slice(midpoint).join(" ")];
+function waterfallLabel(label) {
+  const labels = {
+    "prior 7 days": ["prior 7", "days"],
+    "channel mix": ["channel", "mix"],
+    "platform fees": ["platform", "fees"],
+    refunds: ["refunds"],
+    "COGS / food cost": ["COGS /", "food cost"],
+    "labor efficiency": ["labor", "efficiency"],
+    other: ["other"],
+    "current 7 days": ["current 7", "days"]
+  };
+  return labels[label] || wrapWords(label, 10, 3);
+}
+
+function wrapWords(label, maxChars = 12, maxLines = 2) {
+  const words = String(label).split(/\s+/).filter(Boolean);
+  const lines = [];
+  words.forEach((word) => {
+    const current = lines[lines.length - 1] || "";
+    if (!current || `${current} ${word}`.length > maxChars) {
+      lines.push(word);
+    } else {
+      lines[lines.length - 1] = `${current} ${word}`;
+    }
+  });
+  if (lines.length <= maxLines) return lines;
+  return [...lines.slice(0, maxLines - 1), lines.slice(maxLines - 1).join(" ")];
+}
+
+function truncateLabel(label, maxLength) {
+  const value = String(label);
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3).trim()}...` : value;
 }
