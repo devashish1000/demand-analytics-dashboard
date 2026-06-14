@@ -329,7 +329,7 @@ export function varianceBridge(currentSummary, previousSummary) {
   const labor = -(safeDivide(currentSummary.laborExpense, currentSummary.netSales) - safeDivide(previousSummary.laborExpense, previousSummary.netSales));
   const end = currentSummary.marginPct || 0;
   const rawDrivers = [
-    { id: "channel", label: "channel mix", value: channelMix, driver: channelMix >= 0 ? "direct-order mix improved" : "marketplace mix increased" },
+    { id: "channel", label: "channel mix", value: channelMix, driver: channelMix >= 0 ? "direct-order mix improved" : "third-party delivery mix increased" },
     { id: "fees", label: "platform fees", value: feeRate, driver: feeRate >= 0 ? "effective fee rate improved" : "effective fee rate increased" },
     { id: "refunds", label: "refunds", value: refunds, driver: refunds >= 0 ? "refund rate improved" : "merchant-funded refunds increased" },
     { id: "cogs", label: "COGS / food cost", value: cogs, driver: cogs >= 0 ? "item mix and food cost improved" : "item mix and food cost worsened" },
@@ -574,7 +574,7 @@ export function weeklySummary(data, filters, scenario, options = {}) {
 
 function laborRiskLine(filters) {
   if (filters.market && filters.market !== "all") return `Weekend labor availability is below target in ${filters.market}.`;
-  if (filters.district && filters.district !== "all") return `Weekend labor availability is below target in ${filters.district}.`;
+  if (filters.district && filters.district !== "all") return `Weekend labor availability is below target in the ${filters.district} region.`;
   return "Weekend labor availability is below target in LA and Austin.";
 }
 

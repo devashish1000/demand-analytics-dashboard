@@ -20,7 +20,7 @@ const sampleData = createSampleData();
 const storedActions = JSON.parse(localStorage.getItem("salted-actions") || "{}");
 const DEFAULT_SAVED_VIEWS = [
   { name: "VP finance - weekly", type: "preset" },
-  { name: "LA district - margin", type: "preset" },
+  { name: "LA region - margin", type: "preset" },
   { name: "operators - daily", type: "preset" },
   { name: "menu review - low margin", type: "preset" }
 ];
@@ -84,6 +84,25 @@ const nav = [
 const locationById = Object.fromEntries(LOCATIONS.map((location) => [location.id, location]));
 const brandById = Object.fromEntries(BRANDS.map((brand) => [brand.id, brand]));
 const channelById = Object.fromEntries(CHANNELS.map((channel) => [channel.id, channel]));
+const LEGACY_LOCATION_MAP = {
+  "aus-south": "aus-frontage",
+  "chi-west": "chi-rockwell",
+  "hou-midtown": "hou-blodgett",
+  "dal-north": "dal-commerce",
+  "phx-central": "tempe-alton",
+  "mia-beach": "la-culver",
+  "den-rino": "sf-soma"
+};
+const LEGACY_REGION_MAP = {
+  ATX: "Texas",
+  DAL: "Texas",
+  HOU: "Texas",
+  CHI: "Illinois",
+  LA1: "Southern California",
+  PHX: "Arizona",
+  MIA: "Southern California",
+  DEN: "Northern California"
+};
 
 function currentActions() {
   return sampleData.actions
@@ -132,7 +151,7 @@ function render() {
     <main class="main">
       ${renderTopbar()}
       <section class="disclosure" aria-label="Prototype data disclosure">
-        Sample modeled operating data for a Salted application prototype; not actual Salted data.
+        Public-source-aligned brand, location, and channel options; financial values are sample modeled operating data, not actual Salted data.
       </section>
       <section id="view-root" class="view-root">${renderView()}</section>
     </main>
@@ -184,7 +203,7 @@ function hydrateStateFromUrl() {
 
   const filters = [
     ["market", "all", ["market"]],
-    ["district", "all", ["district"]],
+    ["district", "all", ["region", "district"]],
     ["locationId", "all", ["location", "locationId"]],
     ["brandId", "all", ["brand", "brandId"]],
     ["channelId", "all", ["channel", "channelId"]]
@@ -194,6 +213,7 @@ function hydrateStateFromUrl() {
     if (value) state.filters[key] = value;
     if (!state.filters[key]) state.filters[key] = fallback;
   });
+  normalizePublicFilters();
 
   const validMarkets = new Set(LOCATIONS.map((location) => location.market));
   const validDistricts = new Set(
@@ -231,6 +251,17 @@ function hydrateStateFromUrl() {
   };
 }
 
+function normalizePublicFilters(filters = state.filters) {
+  filters.locationId = LEGACY_LOCATION_MAP[filters.locationId] || filters.locationId || "all";
+  filters.district = LEGACY_REGION_MAP[filters.district] || filters.district || "all";
+  const location = locationById[filters.locationId];
+  if (location) {
+    filters.market = location.market;
+    filters.district = location.district;
+  }
+  return filters;
+}
+
 function renderTopbar() {
   const districts = districtOptionsForFilters(state.filters);
   const locations = locationOptionsForFilters(state.filters);
@@ -240,7 +271,7 @@ function renderTopbar() {
       <div class="filters">
         ${selectControl("date range", "range", rangeKey(), DATE_OPTIONS)}
         ${selectControl("market", "market", state.filters.market, [["all", "all"], ...uniqueOptions(LOCATIONS, "market")])}
-        ${selectControl("district", "district", state.filters.district, [["all", "all"], ...districts.map((district) => [district, district])])}
+        ${selectControl("region", "district", state.filters.district, [["all", "all"], ...districts.map((district) => [district, district])])}
         ${selectControl("location", "locationId", state.filters.locationId, [["all", "all"], ...locations.map((l) => [l.id, l.name])])}
         ${selectControl("brand", "brandId", state.filters.brandId, [["all", "all"], ...BRANDS.map((b) => [b.id, b.name])])}
         ${selectControl("channel", "channelId", state.filters.channelId, [["all", "all"], ...CHANNELS.map((c) => [c.id, c.name])])}
@@ -382,7 +413,7 @@ function renderPnl() {
     ? locationTable(locations, false)
     : emptyState("No location activity found for this filter set.");
   return `
-    <div class="section-heading"><div><h1>location + district P&L</h1><p>Transparent contribution margin by market, location, channel, and controllable cost driver.</p></div>${exportButton("location-performance")}</div>
+    <div class="section-heading"><div><h1>location + region P&L</h1><p>Transparent contribution margin by market, location, channel, and controllable cost driver.</p></div>${exportButton("location-performance")}</div>
     <div class="dashboard-grid">
       <article class="panel span-8"><div class="panel-header"><div><h2>variance bridge</h2><p>Current period vs prior period</p></div></div><div id="pnl-waterfall" class="chart-host large"></div></article>
       <article class="panel span-4">${driverStack(bridge)}</article>
@@ -473,7 +504,7 @@ function renderUpload() {
     ? `${state.uploadMeta.rowCount} rows parsed${state.uploadMeta.fileName ? ` from ${state.uploadMeta.fileName}` : ""}`
     : "No file uploaded yet";
   return `
-    <div class="section-heading"><div><h1>data upload</h1><p>Validate CSV exports before connecting real POS, marketplace, labor, and forecast files.</p></div><button class="primary-btn" data-action="download-samples">${icon("download")} sample workbook</button></div>
+    <div class="section-heading"><div><h1>data upload</h1><p>Validate CSV exports before connecting real POS, third-party delivery, labor, and forecast files.</p></div><button class="primary-btn" data-action="download-samples">${icon("download")} sample workbook</button></div>
     <div class="dashboard-grid">
       <article class="panel span-5">
         <div class="panel-header"><div><h2>upload CSV</h2><p>Prototype parser validates schema and previews rows.</p></div></div>
@@ -513,7 +544,7 @@ function renderDictionary() {
         ["Net sales", "Gross menu sales minus discounts, merchant-funded promos, and merchant-funded refunds."],
         ["Contribution margin", "Net sales minus platform fees, payment fees, food COGS, packaging, and labor."],
         ["Refund leakage", "Merchant-funded refunds divided by gross menu sales."],
-        ["Effective fee rate", "Marketplace and payment fees divided by net sales."]
+        ["Effective fee rate", "Third-party delivery and payment fees divided by net sales."]
       ]
     },
     {
@@ -598,7 +629,7 @@ function channelLegend(rows) {
 function locationTable(rows, compact) {
   return `
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>location</th><th>district</th><th>CM %</th><th>Δ vs prior</th><th>risk</th>${compact ? "<th>top driver</th>" : "<th>net sales</th><th>refund</th><th>top driver</th>"}</tr></thead>
+      <thead><tr><th>location</th><th>region</th><th>CM %</th><th>Δ vs prior</th><th>risk</th>${compact ? "<th>top driver</th>" : "<th>net sales</th><th>refund</th><th>top driver</th>"}</tr></thead>
       <tbody>
         ${rows.map((row) => `
           <tr>
@@ -885,7 +916,7 @@ function scenarioControls(series) {
   if (!series.length) {
     return `
       <div class="panel-header"><div><h2>scenario controls</h2><p>No forecast rows for this selection.</p></div></div>
-      <div class="scenario-empty">${icon("info")} Select another market/district/location or channel with forecast coverage.</div>
+      <div class="scenario-empty">${icon("info")} Select another market/region/location or channel with forecast coverage.</div>
     `;
   }
   const last = series.at(-1);
@@ -1219,11 +1250,11 @@ function workbookConfig(kind, rows, summary) {
   const forecastWeekLabel = summary.forecast?.week || "Rolling Forecast";
   const configs = {
     location: {
-      title: "Location + District P&L",
+      title: "Location + Region P&L",
       tableTitle: "Location Operating Table",
       columns: [
         { key: "location", label: "Location", type: "text", width: 230 },
-        { key: "district", label: "District", type: "text", width: 80 },
+        { key: "region", label: "Region", type: "text", width: 150 },
         { key: "market", label: "Market", type: "text", width: 140 },
         { key: "net_sales", label: "Net Sales", type: "currency", width: 120 },
         { key: "contribution_margin", label: "Contribution Margin", type: "currency", width: 150 },
@@ -1348,7 +1379,7 @@ function downloadSamples() {
     ],
     sections: [
       ["Import Notes", [
-        "Use these sample schemas to map POS, marketplace, labor, COGS, and forecast exports into the prototype.",
+        "Use these sample schemas to map POS, third-party delivery, labor, COGS, and forecast exports into the prototype.",
         "CSV exports remain available from operating views; this workbook is designed for human review and handoff."
       ]]
     ],
@@ -1358,7 +1389,7 @@ function downloadSamples() {
         rows: [
           {
             dataset: "Orders",
-            purpose: "Marketplace and direct-order sales by item, channel, and location.",
+            purpose: "Third-party delivery and direct-order sales by item, channel, and location.",
             required_fields: "date, location, brand, channel, item, quantity, gross sales, discounts, promos, refunds, platform fees",
             format_note: "One row per order-item line."
           },
@@ -1489,7 +1520,7 @@ function applySavedView(name) {
   const customView = customSavedViews.find((view) => view.name === name);
   if (customView) {
     state.view = customView.view;
-    state.filters = JSON.parse(JSON.stringify(customView.filters));
+    state.filters = normalizePublicFilters(JSON.parse(JSON.stringify(customView.filters)));
     state.forecastWeeks = customView.forecastWeeks;
     state.scenario = JSON.parse(JSON.stringify(customView.scenario));
     state.scenarioPreset = customView.scenarioPreset;
@@ -1502,9 +1533,9 @@ function applySavedView(name) {
     state.view = "summary";
     state.filters = { ...state.filters, market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
   }
-  if (name === "LA district - margin") {
+  if (name === "LA region - margin" || name === "LA district - margin") {
     state.view = "pnl";
-    state.filters = { ...state.filters, market: "Los Angeles", district: "LA1", locationId: "all", brandId: "all", channelId: "all" };
+    state.filters = { ...state.filters, market: "Los Angeles", district: "Southern California", locationId: "all", brandId: "all", channelId: "all" };
   }
   if (name === "operators - daily") {
     state.view = "actions";
@@ -1616,7 +1647,7 @@ function periodLabel() {
 function locationExportRow(row) {
   return {
     location: row.name,
-    district: row.district,
+    region: row.district,
     market: row.market,
     net_sales: row.summary.netSales,
     contribution_margin: row.summary.contributionMargin,

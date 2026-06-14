@@ -59,9 +59,9 @@ const locations = locationPerformance(data, filters);
 assert.equal(locations.length, data.locations.length, "all locations should appear in performance table");
 assert.ok(locations.some((location) => location.risk !== "low"), "risk model should flag at least one attention location");
 
-const laLocations = locationPerformance(data, { ...filters, market: "Los Angeles", district: "LA1" });
+const laLocations = locationPerformance(data, { ...filters, market: "Los Angeles", district: "Southern California" });
 assert.ok(laLocations.length > 0, "filtered P&L should retain matching locations with activity");
-assert.ok(laLocations.every((location) => location.market === "Los Angeles" && location.district === "LA1"), "filtered P&L should not show zero-order nonmatching markets");
+assert.ok(laLocations.every((location) => location.market === "Los Angeles" && location.district === "Southern California"), "filtered P&L should not show zero-order nonmatching markets");
 
 const allFiltered = filterData(data, filters);
 const brandFiltered = filterData(data, { ...filters, brandId: "moonbowls" });
@@ -99,7 +99,7 @@ assert.ok(summaryText.why.length >= 3, "weekly summary should include variance d
 const parityFilters = [
   filters,
   { ...filters, market: "Chicago" },
-  { ...filters, market: "Los Angeles", district: "LA1", locationId: "la-culver" },
+  { ...filters, market: "Los Angeles", district: "Southern California", locationId: "la-culver" },
   { ...filters, brandId: "moonbowls" },
   { ...filters, channelId: "direct" },
   { ...filters, range: { start: "2024-05-14", end: "2026-05-11" } }

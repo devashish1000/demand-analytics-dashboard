@@ -5,30 +5,45 @@ const RECENT_PRESSURE_START = DATA_DAYS - 7;
 const FORECAST_WEEKS = 104;
 
 export const LOCATIONS = [
-  { id: "aus-south", name: "Austin - South", market: "Austin", district: "ATX", manager: "Priya Shah", opened: "2025-08-11", capacity: "high" },
-  { id: "chi-west", name: "Chicago - West", market: "Chicago", district: "CHI", manager: "Marco Bell", opened: "2024-11-04", capacity: "high" },
-  { id: "la-culver", name: "LA - Culver City", market: "Los Angeles", district: "LA1", manager: "Elena Ruiz", opened: "2024-05-20", capacity: "high" },
-  { id: "hou-midtown", name: "Houston - Midtown", market: "Houston", district: "HOU", manager: "Andre Lewis", opened: "2025-01-15", capacity: "medium" },
-  { id: "dal-north", name: "Dallas - North", market: "Dallas", district: "DAL", manager: "Nora Patel", opened: "2024-09-09", capacity: "medium" },
-  { id: "phx-central", name: "Phoenix - Central", market: "Phoenix", district: "PHX", manager: "Sam Carter", opened: "2025-02-17", capacity: "medium" },
-  { id: "mia-beach", name: "Miami - Beach", market: "Miami", district: "MIA", manager: "Camila Torres", opened: "2025-06-02", capacity: "medium" },
-  { id: "den-rino", name: "Denver - RiNo", market: "Denver", district: "DEN", manager: "Taylor Ng", opened: "2025-09-22", capacity: "pilot" }
+  { id: "la-culver", name: "LA - Culver City", market: "Los Angeles", district: "Southern California", manager: "Elena Ruiz", opened: "2024-05-20", capacity: "high" },
+  { id: "la-koreatown", name: "LA - Koreatown", market: "Los Angeles", district: "Southern California", manager: "Jon Kim", opened: "2024-06-17", capacity: "high" },
+  { id: "la-hollywood", name: "LA - Hollywood", market: "Los Angeles", district: "Southern California", manager: "Maya Ortiz", opened: "2024-07-08", capacity: "high" },
+  { id: "la-west", name: "LA - West LA", market: "Los Angeles", district: "Southern California", manager: "Reese Carter", opened: "2024-08-05", capacity: "high" },
+  { id: "la-third", name: "LA - 3rd Street", market: "Los Angeles", district: "Southern California", manager: "Nina Patel", opened: "2024-08-19", capacity: "high" },
+  { id: "long-beach-daisy", name: "Long Beach - Daisy", market: "Long Beach", district: "Southern California", manager: "Andre Lewis", opened: "2024-09-09", capacity: "medium" },
+  { id: "san-diego-barrio", name: "San Diego - Barrio Logan", market: "San Diego", district: "Southern California", manager: "Camila Torres", opened: "2024-10-14", capacity: "medium" },
+  { id: "pasadena-colorado", name: "Pasadena - Colorado", market: "Pasadena", district: "Southern California", manager: "Sam Carter", opened: "2025-01-13", capacity: "medium" },
+  { id: "oakland-adeline", name: "Oakland - Adeline", market: "Oakland", district: "Northern California", manager: "Taylor Ng", opened: "2024-11-04", capacity: "medium" },
+  { id: "sf-soma", name: "San Francisco - SoMa", market: "San Francisco", district: "Northern California", manager: "Mina Park", opened: "2025-02-03", capacity: "medium" },
+  { id: "san-jose-grand", name: "San Jose - Grand", market: "San Jose", district: "Northern California", manager: "Drew Hall", opened: "2025-03-03", capacity: "medium" },
+  { id: "chi-rivernorth", name: "Chicago - River North", market: "Chicago", district: "Illinois", manager: "Marco Bell", opened: "2024-11-04", capacity: "high" },
+  { id: "chi-rockwell", name: "Chicago - Rockwell", market: "Chicago", district: "Illinois", manager: "Priya Shah", opened: "2025-01-20", capacity: "medium" },
+  { id: "columbus-essex", name: "Columbus - Essex", market: "Columbus", district: "Ohio", manager: "Nora Patel", opened: "2025-02-17", capacity: "medium" },
+  { id: "atl-forrest", name: "Atlanta - Forrest", market: "Atlanta", district: "Georgia", manager: "Elijah Reed", opened: "2025-03-24", capacity: "medium" },
+  { id: "tempe-alton", name: "Tempe - Alton", market: "Tempe", district: "Arizona", manager: "Riley Scott", opened: "2025-04-14", capacity: "pilot" },
+  { id: "phl-girard", name: "Philadelphia - Girard", market: "Philadelphia", district: "Pennsylvania", manager: "Tessa Morgan", opened: "2025-05-05", capacity: "pilot" },
+  { id: "ny-brooklyn", name: "New York - Brooklyn", market: "New York", district: "New York", manager: "Avery Brooks", opened: "2025-05-19", capacity: "pilot" },
+  { id: "hou-blodgett", name: "Houston - Blodgett", market: "Houston", district: "Texas", manager: "Jordan Miles", opened: "2025-05-26", capacity: "medium" },
+  { id: "dal-commerce", name: "Dallas - Commerce", market: "Dallas", district: "Texas", manager: "Nora Patel", opened: "2025-06-16", capacity: "medium" },
+  { id: "aus-frontage", name: "Austin - Frontage", market: "Austin", district: "Texas", manager: "Priya Shah", opened: "2025-08-11", capacity: "high" }
 ];
 
 export const BRANDS = [
   { id: "moonbowls", name: "moonbowls", tone: "#215a41" },
-  { id: "xenia", name: "xenia", tone: "#9d5a2e" },
+  { id: "xenia", name: "XENiA: Mediterranean Kitchen", tone: "#9d5a2e" },
   { id: "zuzu", name: "zuzubowls", tone: "#bb7a17" },
-  { id: "thrive", name: "thrive protein bowls", tone: "#467c48" },
-  { id: "hibachi", name: "hungry hibachi", tone: "#8d3e2d" },
-  { id: "hawaiian", name: "big daddy's hawaiian", tone: "#214c5a" }
+  { id: "thrive", name: "Thrive Protein Bowls", tone: "#467c48" },
+  { id: "hibachi", name: "Hungry Hibachi", tone: "#8d3e2d" },
+  { id: "hawaiian", name: "Big Daddy's Hawaiian BBQ", tone: "#214c5a" }
 ];
 
 export const CHANNELS = [
-  { id: "marketplace", name: "delivery marketplace", commission: 0.245, payment: 0.027, fixed: 0.32, color: "#163d35" },
-  { id: "direct", name: "direct order", commission: 0.045, payment: 0.029, fixed: 0.18, color: "#3f8a50" },
-  { id: "pickup", name: "pickup", commission: 0.015, payment: 0.027, fixed: 0.12, color: "#f2a51a" },
-  { id: "catering", name: "catering", commission: 0.08, payment: 0.025, fixed: 0.55, color: "#5d6e68" }
+  { id: "direct", name: "Direct website/app", commission: 0.045, payment: 0.029, fixed: 0.18, color: "#3f8a50" },
+  { id: "ubereats", name: "Uber Eats", commission: 0.27, payment: 0.029, fixed: 0.35, color: "#163d35" },
+  { id: "doordash", name: "DoorDash", commission: 0.245, payment: 0.027, fixed: 0.32, color: "#c44a35" },
+  { id: "grubhub-postmates", name: "Grubhub/Postmates", commission: 0.235, payment: 0.027, fixed: 0.3, color: "#5f6f68" },
+  { id: "pickup", name: "Pickup", commission: 0.015, payment: 0.027, fixed: 0.12, color: "#f2a51a" },
+  { id: "catering", name: "Catering", commission: 0.08, payment: 0.025, fixed: 0.55, color: "#5d6e68" }
 ];
 
 export const MENU_ITEMS = [
@@ -50,22 +65,22 @@ export const ACTIONS = [
   {
     id: "act-001",
     priority: "high",
-    locationId: "aus-south",
-    issue: "Review refund causes at Austin - moonbowls PM shift",
-    evidence: "Merchant-funded refunds rose 1.4 pts and late pickup notes increased on marketplace orders.",
+    locationId: "aus-frontage",
+    issue: "Review refund causes at Austin - Frontage PM shift",
+    evidence: "Merchant-funded refunds rose 1.4 pts and late pickup notes increased on third-party delivery orders.",
     estimatedImpactPts: 1.2,
-    owner: "ATX ops mgr",
+    owner: "Texas ops mgr",
     status: "open",
     due: "2026-05-14"
   },
   {
     id: "act-002",
     priority: "high",
-    locationId: "chi-west",
-    issue: "Shift promo spend from marketplace to direct ordering in Chicago",
-    evidence: "Marketplace discounting increased $46K while direct-order AOV stayed 8.1% higher.",
+    locationId: "chi-rivernorth",
+    issue: "Shift promo spend from third-party delivery to direct ordering in Chicago",
+    evidence: "Third-party delivery discounting increased $46K while direct-order AOV stayed 8.1% higher.",
     estimatedImpactPts: 0.8,
-    owner: "CHI market lead",
+    owner: "Illinois market lead",
     status: "in progress",
     due: "2026-05-16"
   },
@@ -84,7 +99,7 @@ export const ACTIONS = [
     id: "act-004",
     priority: "medium",
     locationId: "la-culver",
-    issue: "Investigate labor variance in LA District 2",
+    issue: "Investigate labor variance in Southern California",
     evidence: "Actual hours per 100 orders moved from 19.8 to 22.1; weekend prep staffing is the largest driver.",
     estimatedImpactPts: 0.6,
     owner: "LA ops dir.",
@@ -94,9 +109,9 @@ export const ACTIONS = [
   {
     id: "act-005",
     priority: "medium",
-    locationId: "dal-north",
+    locationId: "dal-commerce",
     issue: "Reduce packaging cost on xenia bowl line",
-    evidence: "Packaging cost/order is 12.4% above district median after container substitution.",
+    evidence: "Packaging cost/order is 12.4% above Texas region median after container substitution.",
     estimatedImpactPts: 0.4,
     owner: "supply chain",
     status: "open",
@@ -105,8 +120,8 @@ export const ACTIONS = [
   {
     id: "act-006",
     priority: "medium",
-    locationId: "hou-midtown",
-    issue: "Audit channel fee drift on delivery marketplace orders",
+    locationId: "hou-blodgett",
+    issue: "Audit channel fee drift on third-party delivery orders",
     evidence: "Effective fee rate increased 1.1 pts without matching order growth.",
     estimatedImpactPts: 0.5,
     owner: "finance ops",
@@ -117,6 +132,7 @@ export const ACTIONS = [
 
 const itemById = Object.fromEntries(MENU_ITEMS.map((item) => [item.id, item]));
 const channelById = Object.fromEntries(CHANNELS.map((channel) => [channel.id, channel]));
+const THIRD_PARTY_CHANNELS = new Set(["ubereats", "doordash", "grubhub-postmates"]);
 
 function seededRandom(seed) {
   let value = seed % 2147483647;
@@ -150,12 +166,14 @@ function weightedPick(items, random) {
 }
 
 function channelWeights(locationId, dayOffset) {
-  const directLift = ["mia-beach", "phx-central", "den-rino"].includes(locationId) ? 0.04 : 0;
-  const marketplacePressure = ["aus-south", "chi-west", "la-culver"].includes(locationId) && dayOffset >= RECENT_PRESSURE_START ? 0.08 : 0;
+  const directLift = ["sf-soma", "tempe-alton", "aus-frontage"].includes(locationId) ? 0.04 : 0;
+  const thirdPartyPressure = ["aus-frontage", "chi-rivernorth", "la-culver"].includes(locationId) && dayOffset >= RECENT_PRESSURE_START ? 0.08 : 0;
   return [
-    { value: "marketplace", weight: 54 + marketplacePressure * 100 },
+    { value: "ubereats", weight: 22 + thirdPartyPressure * 45 },
+    { value: "doordash", weight: 30 + thirdPartyPressure * 55 },
+    { value: "grubhub-postmates", weight: 12 },
     { value: "direct", weight: 14 + directLift * 100 },
-    { value: "pickup", weight: 21 },
+    { value: "pickup", weight: 15 },
     { value: "catering", weight: 7 }
   ];
 }
@@ -164,7 +182,7 @@ function locationDailyBase(location, dayOffset) {
   const capacity = location.capacity === "high" ? 1.22 : location.capacity === "pilot" ? 0.72 : 0.98;
   const weekend = [5, 6].includes((dayOffset + 2) % 7) ? 1.13 : 1;
   const seasonal = 1 + Math.sin((dayOffset + location.id.length) / 6) * 0.06;
-  const pressure = ["aus-south", "chi-west", "la-culver"].includes(location.id) && dayOffset >= RECENT_PRESSURE_START ? 0.96 : 1.02;
+  const pressure = ["aus-frontage", "chi-rivernorth", "la-culver"].includes(location.id) && dayOffset >= RECENT_PRESSURE_START ? 0.96 : 1.02;
   return 46 * capacity * weekend * seasonal * pressure;
 }
 
@@ -176,6 +194,7 @@ function itemForBrand(brandId, day, channelId, locationId) {
 
 function buildOrder(day, location, index, channelId, item, random) {
   const channel = channelById[channelId];
+  const isThirdParty = THIRD_PARTY_CHANNELS.has(channelId);
   const quantity = random() > 0.89 ? 2 : 1;
   const daypart = weightedPick(
     [
@@ -185,20 +204,20 @@ function buildOrder(day, location, index, channelId, item, random) {
     ],
     random
   );
-  const priceModifier = channelId === "catering" ? 1.08 : channelId === "direct" ? 0.99 : 1.02;
+  const priceModifier = channelId === "catering" ? 1.08 : channelId === "direct" ? 0.99 : channelId === "pickup" ? 1 : 1.02;
   const grossSales = round(item.price * quantity * priceModifier);
-  const discountRate = channelId === "marketplace" ? 0.035 + random() * 0.03 : channelId === "direct" ? 0.018 : 0.01;
+  const discountRate = isThirdParty ? 0.035 + random() * 0.03 : channelId === "direct" ? 0.018 : 0.01;
   const merchantPromo = round(grossSales * discountRate);
-  const platformPromoFunding = round(channelId === "marketplace" ? grossSales * (random() > 0.86 ? 0.022 : 0) : 0);
-  const refundStress = ["aus-south", "chi-west"].includes(location.id) && day >= RECENT_PRESSURE_START && daypart === "dinner" ? 0.035 : 0.012;
+  const platformPromoFunding = round(isThirdParty ? grossSales * (random() > 0.86 ? 0.022 : 0) : 0);
+  const refundStress = ["aus-frontage", "chi-rivernorth"].includes(location.id) && day >= RECENT_PRESSURE_START && daypart === "dinner" ? 0.035 : 0.012;
   const refundMerchant = round(random() < refundStress ? grossSales * (0.45 + random() * 0.45) : 0);
   const refundPlatform = round(random() < 0.006 ? grossSales * 0.35 : 0);
   const platformFee = round(channel.commission * grossSales + channel.fixed * quantity);
   const paymentFee = round(channel.payment * grossSales);
   const foodInflation = item.category.includes("protein") || item.category === "hibachi" ? 1.045 : 1.018;
-  const wasteFactor = ["la-culver", "dal-north"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.04 : 1;
+  const wasteFactor = ["la-culver", "dal-commerce"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.04 : 1;
   const foodCost = round(item.foodCost * quantity * foodInflation * wasteFactor);
-  const packagingCost = round(item.packaging * quantity * (channelId === "marketplace" ? 1.08 : 1));
+  const packagingCost = round(item.packaging * quantity * (isThirdParty ? 1.08 : 1));
 
   return {
     id: `ord-${day}-${location.id}-${index}`,
@@ -237,8 +256,8 @@ export function createSampleData() {
       const coverageTarget = CHANNELS.length * BRANDS.length;
       const projectedOrders = dailyTarget + coverageTarget;
       const laborBase = projectedOrders * (location.capacity === "high" ? 0.14 : 0.17);
-      const laborVariance = ["la-culver", "hou-midtown"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.09 : 1;
-      const hourlyRate = location.market === "Los Angeles" ? 23.5 : location.market === "Miami" ? 20.4 : 21.2;
+      const laborVariance = ["la-culver", "hou-blodgett"].includes(location.id) && day >= RECENT_PRESSURE_START ? 1.09 : 1;
+      const hourlyRate = location.district === "Southern California" ? 23.5 : location.district === "Northern California" ? 24.2 : 21.2;
       labor.push({
         date: isoDate(day),
         locationId: location.id,
@@ -307,7 +326,7 @@ export function createForecast(orders, labor) {
     return weeks.map((week) => {
       const growth = 1 + week * 0.008 + Math.sin(week + location.id.length) * 0.012;
       const directMixLift = week >= 5 ? 0.012 * (week - 4) : 0;
-      const feeRisk = ["chi-west", "hou-midtown"].includes(location.id) && week >= 4 ? 0.015 : 0;
+      const feeRisk = ["chi-rivernorth", "chi-rockwell", "hou-blodgett"].includes(location.id) && week >= 4 ? 0.015 : 0;
       const revenueForecast = round(weeklyRevenue * growth * (0.985 + random() * 0.03));
       const ordersForecast = Math.round(weeklyOrders * growth * (0.98 + random() * 0.04));
       const cogsForecast = round(weeklyCogs * (growth + 0.012 * week));

@@ -3,7 +3,7 @@ import { downloadText, toCsv } from "./csv.js";
 
 const DEFAULT_META = {
   generated: "May 11, 2026 8:30 AM",
-  disclosure: "Sample modeled operating data for a Salted application prototype; not actual Salted data."
+  disclosure: "Public-source-aligned brand, location, and channel options; financial values are sample modeled operating data, not actual Salted data."
 };
 
 export function buildWeeklySummaryText(summary) {
@@ -75,7 +75,7 @@ export function downloadSummary(summary) {
 const CSV_SCHEMAS = {
   location: [
     { key: "location", label: "Location" },
-    { key: "district", label: "District" },
+    { key: "region", label: "Region" },
     { key: "market", label: "Market" },
     { key: "net_sales", label: "Net Sales", format: "currency0" },
     { key: "contribution_margin", label: "Contribution Margin", format: "currency0" },
