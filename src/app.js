@@ -18,6 +18,8 @@ import { buildActionCsv, copySummary, downloadSummary, exportRows, exportWorkboo
 const app = document.querySelector("#app");
 const sampleData = createSampleData();
 const storedActions = JSON.parse(localStorage.getItem("salted-actions") || "{}");
+const TOUR_DISMISSED_KEY = "salted-tour-dismissed-v1";
+const TOUR_COMPLETED_KEY = "salted-tour-completed-v1";
 const DEFAULT_SAVED_VIEWS = [
   { name: "VP finance - weekly", type: "preset" },
   { name: "LA region - margin", type: "preset" },
@@ -40,6 +42,57 @@ const DATE_RANGES = {
 
 const DATE_OPTIONS = Object.entries(DATE_RANGES).map(([key, range]) => [key, range.label]);
 const FORECAST_WEEK_OPTIONS = [8, 13, 26, 52, 78, 104];
+const TOUR_STEPS = [
+  {
+    target: "overview-filters",
+    title: "Set the operating lens",
+    body: "Choose the date range, market, region, location, brand, channel, and forecast horizon for the full workspace.",
+    why: "Keeps finance and operations aligned on the same scoped readout.",
+    view: "overview"
+  },
+  {
+    target: "overview-kpis",
+    title: "Read the week at a glance",
+    body: "Start with sales, contribution margin, orders, direct-order mix, and refunds. Each card pairs current performance with movement versus the comparison period.",
+    why: "Shows whether margin moved because of demand, mix, cost, or leakage.",
+    view: "overview"
+  },
+  {
+    target: "overview-variance-bridge",
+    title: "Isolate the margin drivers",
+    body: "The bridge decomposes CM% movement into controllable drivers and highlights the largest contributors in the callout below.",
+    why: "Turns a margin change into an explainable operating story.",
+    view: "overview"
+  },
+  {
+    target: "overview-channel-mix",
+    title: "Check channel economics",
+    body: "The donut and legend show where sales are coming from by channel, including order count and net sales contribution.",
+    why: "Channel shift can materially change fees, refunds, and contribution margin.",
+    view: "overview"
+  },
+  {
+    target: "overview-location-attention",
+    title: "Focus the market review",
+    body: "This panel surfaces locations above the watch threshold with CM%, movement versus prior, risk level, and top driver.",
+    why: "Prioritizes leadership attention without scanning every location.",
+    view: "overview"
+  },
+  {
+    target: "overview-forecast",
+    title: "Preview forward margin",
+    body: "The rolling forecast compares actuals, base forecast, and the selected scenario preset over the active horizon.",
+    why: "Connects current performance to forward margin expectations.",
+    view: "overview"
+  },
+  {
+    target: "overview-weekly-summary",
+    title: "Package the leadership readout",
+    body: "The weekly summary turns the analysis into a send-ready finance brief, with copy and Excel export paths close at hand.",
+    why: "Closes the loop from diagnosis to a practical leadership handoff.",
+    view: "overview"
+  }
+];
 
 const state = {
   view: "overview",
@@ -65,10 +118,18 @@ const state = {
   uploadKind: "orders",
   uploadMeta: { attempted: false, fileName: "", rowCount: 0 },
   moreOpen: false,
+  tour: {
+    active: false,
+    promptOpen: false,
+    step: 0,
+    focusPending: false
+  },
   toast: ""
 };
 let renderFrame = 0;
 let chartFrame = 0;
+let tourFrame = 0;
+let globalEventsBound = false;
 
 const nav = [
   { id: "overview", label: "executive overview", icon: "home" },
@@ -156,8 +217,11 @@ function render() {
       <section id="view-root" class="view-root">${renderView()}</section>
     </main>
     <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
+    ${renderTourPrompt()}
+    ${renderTourLayer()}
   `;
   bindShellEvents();
+  queueTourPosition();
   if (chartFrame) window.cancelAnimationFrame(chartFrame);
   chartFrame = window.requestAnimationFrame(() => {
     chartFrame = 0;
@@ -241,6 +305,12 @@ function hydrateStateFromUrl() {
     state.filters.market = locationById[state.filters.locationId].market;
     state.filters.district = locationById[state.filters.locationId].district;
   }
+  if (params.get("tour") === "1") {
+    state.view = "overview";
+    state.tour = { ...state.tour, active: true, promptOpen: false, step: 0, focusPending: true };
+  } else if (!storedFlag(TOUR_DISMISSED_KEY) && !storedFlag(TOUR_COMPLETED_KEY)) {
+    state.tour.promptOpen = true;
+  }
   state.filters = {
     ...state.filters,
     market: state.filters.market || "all",
@@ -268,7 +338,7 @@ function renderTopbar() {
   const showForecastWeeks = ["overview", "forecast", "summary"].includes(state.view);
   return `
     <header class="topbar">
-      <div class="filters">
+      <div class="filters" data-tour="overview-filters">
         ${selectControl("date range", "range", rangeKey(), DATE_OPTIONS)}
         ${selectControl("market", "market", state.filters.market, [["all", "all"], ...uniqueOptions(LOCATIONS, "market")])}
         ${selectControl("region", "district", state.filters.district, [["all", "all"], ...districts.map((district) => [district, district])])}
@@ -282,6 +352,7 @@ function renderTopbar() {
         <div class="as-of">data as of<br><strong>May 11, 2026 8:30 AM</strong></div>
         <button class="utility-btn" data-action="reset">${icon("refresh")} reset</button>
         <button class="utility-btn" data-action="save">${icon("bookmark")} save view</button>
+        <button class="utility-btn guide-btn" data-action="start-tour" aria-label="Start guided tour" title="Start guided tour">${icon("info")}<span>guide</span></button>
         <div class="more-wrap">
           <button class="utility-btn icon-only" data-action="more" title="More options" aria-expanded="${state.moreOpen ? "true" : "false"}">${icon("more")}</button>
           ${state.moreOpen ? `
@@ -289,6 +360,7 @@ function renderTopbar() {
               <button data-action="copy-summary" role="menuitem">${icon("copy")} Copy weekly summary</button>
               <button data-action="download-summary" role="menuitem">${icon("download")} Download summary Excel</button>
               <button data-action="download-samples" role="menuitem">${icon("download")} Download sample workbook</button>
+              <button data-action="start-tour" role="menuitem">${icon("info")} Start guided tour</button>
               <button data-link-view="upload" data-view="upload" role="menuitem">${icon("upload")} Open data upload</button>
               <button data-link-view="dictionary" data-view="dictionary" role="menuitem">${icon("book")} Open dictionary</button>
             </div>
@@ -313,6 +385,50 @@ function renderView() {
   return views[state.view]();
 }
 
+function renderTourPrompt() {
+  if (!state.tour.promptOpen || state.tour.active) return "";
+  return `
+    <section class="tour-welcome" role="dialog" aria-modal="false" aria-labelledby="tour-welcome-title" aria-describedby="tour-welcome-body">
+      <button class="tour-close" data-action="dismiss-tour" aria-label="Close guided tour prompt">${icon("close")}</button>
+      <span class="tour-kicker">guided tour</span>
+      <h2 id="tour-welcome-title">Want a 90-second walkthrough?</h2>
+      <p id="tour-welcome-body">See how the filters, margin bridge, channel mix, forecast, and finance summary work together. You can skip it and reopen it anytime from Guide.</p>
+      <div class="tour-actions">
+        <button class="primary-btn" data-action="start-tour">${icon("info")} Start tour</button>
+        <button class="utility-btn" data-action="dismiss-tour">Explore myself</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderTourLayer() {
+  if (!state.tour.active) return "";
+  const step = activeTourStep();
+  const isLast = state.tour.step === TOUR_STEPS.length - 1;
+  return `
+    <div class="tour-layer" data-tour-layer>
+      <div class="tour-highlight" data-tour-highlight aria-hidden="true"></div>
+      <section class="tour-card" data-tour-card role="dialog" aria-modal="false" aria-labelledby="tour-title" aria-describedby="tour-body">
+        <button class="tour-close" data-action="close-tour" aria-label="Close guided tour">${icon("close")}</button>
+        <div class="tour-card-header">
+          <span class="tour-kicker" aria-live="polite">Step ${state.tour.step + 1} of ${TOUR_STEPS.length}</span>
+          <div class="tour-progress" aria-hidden="true">
+            ${TOUR_STEPS.map((_, index) => `<i class="${index === state.tour.step ? "active" : ""}"></i>`).join("")}
+          </div>
+        </div>
+        <h2 id="tour-title">${step.title}</h2>
+        <p id="tour-body">${step.body}</p>
+        <p class="tour-why"><strong>Why it matters:</strong> ${step.why}</p>
+        <div class="tour-actions">
+          <button class="utility-btn" data-action="skip-tour">Skip</button>
+          <button class="utility-btn" data-action="tour-back" ${state.tour.step === 0 ? "disabled" : ""}>Back</button>
+          <button class="primary-btn" data-action="tour-next">${isLast ? "Done" : "Next"}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderOverview() {
   const comparison = comparePeriods(sampleData, state.filters);
   const { currentSummary, previousSummary } = comparison;
@@ -335,7 +451,7 @@ function renderOverview() {
   const comparisonText = comparisonLabel();
 
   return `
-    <div class="metric-row">
+    <div class="metric-row" data-tour="overview-kpis">
       ${metricCard("net sales", currentSummary.netSales, previousSummary.netSales, "currency", "bad", false, comparisonText)}
       ${metricCard("contribution margin", currentSummary.contributionMargin, previousSummary.contributionMargin, "currency", "good", false, comparisonText)}
       ${metricCard("contribution margin %", currentSummary.marginPct, previousSummary.marginPct, "percent", "bad", false, comparisonText)}
@@ -344,7 +460,7 @@ function renderOverview() {
       ${metricCard("refund rate", currentSummary.refundRate, previousSummary.refundRate, "percent", "bad", true, comparisonText)}
     </div>
     <div class="dashboard-grid overview-grid">
-      <article class="panel span-5">
+      <article class="panel span-5" data-tour="overview-variance-bridge">
         <div class="panel-header">
           <div><h2>margin variance bridge <span>(contribution margin %)</span></h2><p>${comparisonText}</p></div>
           ${icon("info")}
@@ -357,7 +473,7 @@ function renderOverview() {
           <button class="link-btn" data-link-view="pnl" data-view="pnl">view full bridge</button>
         </div>
       </article>
-      <article class="panel span-4">
+      <article class="panel span-4" data-tour="overview-channel-mix">
         <div class="panel-header"><div><h2>sales mix by channel</h2><p>% of net sales</p></div></div>
         <div class="donut-layout">
           <div id="donut" class="chart-host"></div>
@@ -365,14 +481,14 @@ function renderOverview() {
         </div>
         <div class="note-line">${icon("search")} Direct-order mix ${currentSummary.directOrderMix > previousSummary.directOrderMix ? "improved" : "declined"} ${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)} ${comparisonText}.</div>
       </article>
-      <article class="panel span-3">
+      <article class="panel span-3" data-tour="overview-location-attention">
         <div class="panel-header">
           <div><h2>locations needing attention <span class="badge danger">${attentionRows.length}</span></h2></div>
           <button class="link-btn" data-link-view="pnl" data-view="pnl">view all</button>
         </div>
         ${attentionList(attentionRows.slice(0, 4), hasCurrentActivity)}
       </article>
-      <article class="panel span-5">
+      <article class="panel span-5" data-tour="overview-forecast">
         <div class="panel-header">
           <div><h2>${forecast.length ? `${forecast.length}-week rolling forecast` : "rolling forecast"}</h2><p>actual, base forecast, and scenario</p></div>
           <select class="mini-select" data-scenario-preset>
@@ -387,17 +503,17 @@ function renderOverview() {
           ${forecastCard(forecast)}
         </div>
       </article>
-      <article class="panel span-4">
+      <article class="panel span-4" data-tour="overview-actions">
         <div class="panel-header">
           <div><h2>operator action queue <span class="badge danger">${actions.filter((a) => a.status !== "done").length}</span></h2></div>
           <button class="link-btn" data-link-view="actions" data-view="actions">view all</button>
         </div>
         ${compactActionList(actions.slice(0, 5))}
       </article>
-      <article class="panel span-3">
+      <article class="panel span-3" data-tour="overview-weekly-summary">
         ${summaryPanel(summary)}
       </article>
-      <article class="panel span-12">
+      <article class="panel span-12" data-tour="overview-menu-spotlight">
         <div class="panel-header"><div><h2>menu margin spotlight</h2><p>top performers vs. trending down</p></div><button class="link-btn" data-link-view="menu" data-view="menu">view full menu margin -></button></div>
         ${menuSpotlight(menuRows)}
       </article>
@@ -1020,6 +1136,7 @@ function uniqueOptions(rows, key) {
 function bindShellEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (state.tour.active) closeTour({ completed: false, silent: true });
       state.view = button.dataset.view;
       state.moreOpen = false;
       scheduleRender();
@@ -1077,6 +1194,7 @@ function bindShellEvents() {
   });
   const uploadFile = document.querySelector("[data-upload-file]");
   if (uploadFile) uploadFile.addEventListener("change", handleUpload);
+  bindGlobalEvents();
 }
 
 function renderCharts() {
@@ -1125,6 +1243,147 @@ function renderCharts() {
   });
 }
 
+function activeTourStep() {
+  return TOUR_STEPS[Math.min(Math.max(state.tour.step, 0), TOUR_STEPS.length - 1)];
+}
+
+function startTour() {
+  state.view = "overview";
+  state.moreOpen = false;
+  state.tour = { active: true, promptOpen: false, step: 0, focusPending: true };
+  setStoredFlag(TOUR_DISMISSED_KEY, true);
+  scheduleRender();
+}
+
+function dismissTourPrompt() {
+  state.tour.promptOpen = false;
+  setStoredFlag(TOUR_DISMISSED_KEY, true);
+  notify("Guide is available anytime from the top bar.");
+}
+
+function closeTour({ completed = false, silent = false } = {}) {
+  state.tour.active = false;
+  state.tour.promptOpen = false;
+  state.tour.focusPending = false;
+  setStoredFlag(TOUR_DISMISSED_KEY, true);
+  if (completed) setStoredFlag(TOUR_COMPLETED_KEY, true);
+  if (!silent) notify(completed ? "Guided tour complete. Reopen it anytime from Guide." : "Guided tour closed. Reopen it anytime from Guide.");
+  else scheduleRender();
+}
+
+function goToTourStep(step) {
+  const nextStep = clamp(step, 0, TOUR_STEPS.length - 1);
+  state.tour.step = nextStep;
+  state.tour.active = true;
+  state.tour.promptOpen = false;
+  state.tour.focusPending = true;
+  state.view = TOUR_STEPS[nextStep].view;
+  scheduleRender();
+}
+
+function bindGlobalEvents() {
+  if (globalEventsBound) return;
+  globalEventsBound = true;
+  document.addEventListener("keydown", handleGlobalKeydown);
+  window.addEventListener("resize", () => queueTourPosition());
+  window.addEventListener("scroll", () => queueTourPosition(), true);
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key !== "Escape") return;
+  if (state.tour.active) {
+    event.preventDefault();
+    closeTour({ completed: false });
+    return;
+  }
+  if (state.tour.promptOpen) {
+    event.preventDefault();
+    dismissTourPrompt();
+  }
+}
+
+function queueTourPosition() {
+  if (!state.tour.active) return;
+  if (tourFrame) window.cancelAnimationFrame(tourFrame);
+  tourFrame = window.requestAnimationFrame(() => {
+    tourFrame = 0;
+    positionTour();
+  });
+}
+
+function positionTour() {
+  if (!state.tour.active) return;
+  const step = activeTourStep();
+  const layer = document.querySelector("[data-tour-layer]");
+  const highlight = document.querySelector("[data-tour-highlight]");
+  const card = document.querySelector("[data-tour-card]");
+  if (!layer || !highlight || !card) return;
+
+  const target = document.querySelector(`[data-tour="${step.target}"]`);
+  if (!target) {
+    if (state.view !== step.view) {
+      state.view = step.view;
+      scheduleRender();
+      return;
+    }
+    highlight.hidden = true;
+    card.classList.add("is-unanchored");
+    focusTourControl(card);
+    return;
+  }
+
+  card.classList.remove("is-unanchored");
+  highlight.hidden = false;
+
+  let rect = target.getBoundingClientRect();
+  const mobile = window.matchMedia("(max-width: 760px)").matches;
+  const needsScroll = rect.top < 72 || rect.bottom > window.innerHeight - (mobile ? 330 : 36);
+  if (needsScroll && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ block: mobile ? "center" : "nearest", inline: "nearest" });
+    rect = target.getBoundingClientRect();
+  }
+
+  const pad = mobile ? 5 : 7;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const left = clamp(rect.left - pad, 8, Math.max(8, viewportWidth - 24));
+  const top = clamp(rect.top - pad, 8, Math.max(8, viewportHeight - 24));
+  const right = clamp(rect.right + pad, 16, viewportWidth - 8);
+  const bottom = clamp(rect.bottom + pad, 16, viewportHeight - 8);
+  highlight.style.left = `${left}px`;
+  highlight.style.top = `${top}px`;
+  highlight.style.width = `${Math.max(24, right - left)}px`;
+  highlight.style.height = `${Math.max(24, bottom - top)}px`;
+
+  if (mobile) {
+    card.style.left = "";
+    card.style.top = "";
+    card.style.right = "";
+    card.style.bottom = "";
+    focusTourControl(card);
+    return;
+  }
+
+  const cardRect = card.getBoundingClientRect();
+  const gap = 14;
+  let cardLeft = rect.right + gap;
+  if (cardLeft + cardRect.width > viewportWidth - 12) cardLeft = rect.left - cardRect.width - gap;
+  if (cardLeft < 12) cardLeft = clamp(rect.left, 12, viewportWidth - cardRect.width - 12);
+  const cardTop = clamp(rect.top, 12, viewportHeight - cardRect.height - 12);
+  card.style.left = `${cardLeft}px`;
+  card.style.top = `${cardTop}px`;
+  card.style.right = "auto";
+  card.style.bottom = "auto";
+  focusTourControl(card);
+}
+
+function focusTourControl(card) {
+  if (!state.tour.focusPending) return;
+  const target = card.querySelector("[data-action='tour-next']") || card.querySelector("button");
+  if (target) target.focus({ preventScroll: true });
+  state.tour.focusPending = false;
+}
+
 function updateFilter(key, value) {
   state.moreOpen = false;
   if (key === "range") {
@@ -1156,6 +1415,30 @@ function updateFilter(key, value) {
 
 function handleAction(action) {
   if (action !== "more") state.moreOpen = false;
+  if (action === "start-tour") {
+    startTour();
+    return;
+  }
+  if (action === "dismiss-tour") {
+    dismissTourPrompt();
+    return;
+  }
+  if (action === "close-tour" || action === "skip-tour") {
+    closeTour({ completed: false });
+    return;
+  }
+  if (action === "tour-back") {
+    goToTourStep(state.tour.step - 1);
+    return;
+  }
+  if (action === "tour-next") {
+    if (state.tour.step >= TOUR_STEPS.length - 1) {
+      closeTour({ completed: true });
+    } else {
+      goToTourStep(state.tour.step + 1);
+    }
+    return;
+  }
   if (action === "reset") {
     state.filters = { range: rangeForKey("current"), market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
     state.forecastWeeks = 104;
@@ -1613,6 +1896,26 @@ function matchesFilter(filterValue, actualValue) {
   return !filterValue || filterValue === "all" || filterValue === actualValue;
 }
 
+function storedFlag(key) {
+  try {
+    return localStorage.getItem(key) === "true";
+  } catch (error) {
+    return false;
+  }
+}
+
+function setStoredFlag(key, value) {
+  try {
+    localStorage.setItem(key, value ? "true" : "false");
+  } catch (error) {
+    // Tour state is helpful but not required for the app to operate.
+  }
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function statusSelect(action) {
   return `<select class="status-select" data-status="${action.id}">${["open", "queued", "in progress", "done"].map((status) => `<option value="${status}" ${action.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>`;
 }
@@ -1706,7 +2009,8 @@ function icon(name) {
     search: "M10 18a8 8 0 1 1 5.3-14M15 15l6 6",
     copy: "M8 8h11v11H8z M5 16H4a1 1 0 0 1-1-1V4h11v1",
     download: "M12 3v12 M7 10l5 5 5-5 M5 21h14",
-    arrowDown: "M12 5v14 M6 13l6 6 6-6"
+    arrowDown: "M12 5v14 M6 13l6 6 6-6",
+    close: "M6 6l12 12 M18 6L6 18"
   };
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[name] || icons.dot}" /></svg>`;
 }
