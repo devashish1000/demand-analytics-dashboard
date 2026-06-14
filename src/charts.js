@@ -282,7 +282,7 @@ export function renderDonut(container, rows) {
   container.appendChild(node);
 }
 
-export function renderForecast(container, series) {
+export function renderForecast(container, series, options = {}) {
   const tooltip = resetChart(container);
   const { width, height } = chartDimensions(container, 650, 290, 290);
   const pad = { top: 22, right: 24, bottom: 38, left: 46 };
@@ -309,7 +309,7 @@ export function renderForecast(container, series) {
   const max = Math.max(0.3, ...values) + 0.01;
   const x = (index) => pad.left + (index / (series.length - 1)) * (width - pad.left - pad.right);
   const y = (value) => pad.top + (max - value) / (max - min) * (height - pad.top - pad.bottom);
-  const labelStep = Math.max(2, Math.round(series.length / 16));
+  const labelIndexes = forecastLabelIndexes(series.length, options.labelMode || "full");
 
   [0.1, 0.15, 0.2, 0.25, 0.3].forEach((tick) => {
     const tickY = y(tick);
@@ -351,12 +351,26 @@ export function renderForecast(container, series) {
   });
 
   series.forEach((row, index) => {
-    if (index % labelStep === 0 || index === series.length - 1) {
+    if (labelIndexes.has(index)) {
       node.appendChild(el("text", { x: x(index), y: height - 12, class: "axis-label chart-x-label forecast-x-label", "text-anchor": "middle" }, `W${index + 1}`));
     }
   });
 
   container.appendChild(node);
+}
+
+function forecastLabelIndexes(length, mode) {
+  if (length <= 0) return new Set();
+  if (mode === "compact") {
+    return new Set([0, Math.floor((length - 1) / 2), length - 1]);
+  }
+  const maxLabels = length > 52 ? 12 : 14;
+  const labelStep = Math.max(2, Math.ceil(length / maxLabels));
+  const indexes = new Set([0, length - 1]);
+  for (let index = 0; index < length; index += labelStep) {
+    indexes.add(index);
+  }
+  return indexes;
 }
 
 export function renderBarTrend(container, rows, accessor, labelAccessor) {

@@ -18,6 +18,13 @@ import { buildActionCsv, copySummary, downloadSummary, exportRows, exportWorkboo
 const app = document.querySelector("#app");
 const sampleData = createSampleData();
 const storedActions = JSON.parse(localStorage.getItem("salted-actions") || "{}");
+const DEFAULT_SAVED_VIEWS = [
+  { name: "VP finance - weekly", type: "preset" },
+  { name: "LA district - margin", type: "preset" },
+  { name: "operators - daily", type: "preset" },
+  { name: "menu review - low margin", type: "preset" }
+];
+const customSavedViews = JSON.parse(localStorage.getItem("salted-saved-views") || "[]");
 
 const DATE_RANGES = {
   current: { start: "2026-05-05", end: "2026-05-11", label: "May 5 - May 11, 2026" },
@@ -56,6 +63,8 @@ const state = {
   forecastWeeks: 104,
   uploadRows: [],
   uploadKind: "orders",
+  uploadMeta: { attempted: false, fileName: "", rowCount: 0 },
+  moreOpen: false,
   toast: ""
 };
 
@@ -84,6 +93,10 @@ function currentActions() {
     }));
 }
 
+function savedViews() {
+  return [...DEFAULT_SAVED_VIEWS, ...customSavedViews];
+}
+
 function render() {
   app.innerHTML = `
     <aside class="sidebar">
@@ -93,7 +106,7 @@ function render() {
       </div>
       <nav class="nav-list" aria-label="Primary">
         ${nav.map((item) => `
-          <button class="nav-item ${state.view === item.id ? "active" : ""}" data-view="${item.id}" aria-label="${item.label}" title="${item.label}">
+          <button class="nav-item ${state.view === item.id ? "active" : ""}" data-nav-view="${item.id}" data-view="${item.id}" aria-label="${item.label}" title="${item.label}">
             ${icon(item.icon)}
             <span>${item.label}</span>
           </button>
@@ -101,8 +114,8 @@ function render() {
       </nav>
       <div class="saved-views">
         <div class="saved-heading">saved views <span>⌃</span></div>
-        ${["VP finance - weekly", "LA district - margin", "operators - daily", "menu review - low margin"].map((item) => `
-          <button class="saved-view" data-saved="${item}">${icon("dot")}${item}</button>
+        ${savedViews().map((item) => `
+          <button class="saved-view" data-saved="${escapeHtml(item.name)}">${icon("dot")}${escapeHtml(item.name)}</button>
         `).join("")}
       </div>
       <div class="profile-block">
@@ -116,8 +129,8 @@ function render() {
     </aside>
     <main class="main">
       ${renderTopbar()}
-      <section class="disclosure">
-        Sample modeled operating data; not actual Salted data. Built to connect POS, marketplace, labor, COGS, and forecast exports.
+      <section class="disclosure" aria-label="Prototype data disclosure">
+        Sample modeled operating data for a Salted application prototype; not actual Salted data.
       </section>
       <section id="view-root" class="view-root">${renderView()}</section>
     </main>
@@ -209,7 +222,7 @@ function hydrateStateFromUrl() {
 function renderTopbar() {
   const districts = districtOptionsForFilters(state.filters);
   const locations = locationOptionsForFilters(state.filters);
-  const showForecastWeeks = ["overview", "forecast", "summary", "actions"].includes(state.view);
+  const showForecastWeeks = ["overview", "forecast", "summary"].includes(state.view);
   return `
     <header class="topbar">
       <div class="filters">
@@ -226,7 +239,18 @@ function renderTopbar() {
         <div class="as-of">data as of<br><strong>May 11, 2026 8:30 AM</strong></div>
         <button class="utility-btn" data-action="reset">${icon("refresh")} reset</button>
         <button class="utility-btn" data-action="save">${icon("bookmark")} save view</button>
-        <button class="utility-btn icon-only" data-action="more" title="More options">${icon("more")}</button>
+        <div class="more-wrap">
+          <button class="utility-btn icon-only" data-action="more" title="More options" aria-expanded="${state.moreOpen ? "true" : "false"}">${icon("more")}</button>
+          ${state.moreOpen ? `
+            <div class="more-menu" role="menu" aria-label="More actions">
+              <button data-action="copy-summary" role="menuitem">${icon("copy")} Copy weekly summary</button>
+              <button data-action="download-summary" role="menuitem">${icon("download")} Download summary Excel</button>
+              <button data-action="download-samples" role="menuitem">${icon("download")} Download sample workbook</button>
+              <button data-link-view="upload" data-view="upload" role="menuitem">${icon("upload")} Open data upload</button>
+              <button data-link-view="dictionary" data-view="dictionary" role="menuitem">${icon("book")} Open dictionary</button>
+            </div>
+          ` : ""}
+        </div>
       </div>
     </header>
   `;
@@ -287,7 +311,7 @@ function renderOverview() {
           ${icon("arrowDown")}
           <div><strong>Contribution margin ${currentSummary.marginPct < previousSummary.marginPct ? "decreased" : "improved"} ${formatters.points(currentSummary.marginPct - previousSummary.marginPct)}.</strong><br>
           Main drivers: ${bridge.filter((b) => !b.type).sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 2).map((d) => `${d.label} ${formatters.points(d.value)}`).join(", ")}.</div>
-          <button class="link-btn" data-view="pnl">view full bridge</button>
+          <button class="link-btn" data-link-view="pnl" data-view="pnl">view full bridge</button>
         </div>
       </article>
       <article class="panel span-4">
@@ -301,7 +325,7 @@ function renderOverview() {
       <article class="panel span-3">
         <div class="panel-header">
           <div><h2>locations needing attention <span class="badge danger">${attentionRows.length}</span></h2></div>
-          <button class="link-btn" data-view="pnl">view all</button>
+          <button class="link-btn" data-link-view="pnl" data-view="pnl">view all</button>
         </div>
         ${attentionList(attentionRows.slice(0, 4), hasCurrentActivity)}
       </article>
@@ -323,7 +347,7 @@ function renderOverview() {
       <article class="panel span-4">
         <div class="panel-header">
           <div><h2>operator action queue <span class="badge danger">${actions.filter((a) => a.status !== "done").length}</span></h2></div>
-          <button class="link-btn" data-view="actions">view all</button>
+          <button class="link-btn" data-link-view="actions" data-view="actions">view all</button>
         </div>
         ${compactActionList(actions.slice(0, 5))}
       </article>
@@ -331,7 +355,7 @@ function renderOverview() {
         ${summaryPanel(summary)}
       </article>
       <article class="panel span-12">
-        <div class="panel-header"><div><h2>menu margin spotlight</h2><p>top performers vs. trending down</p></div><button class="link-btn" data-view="menu">view full menu margin →</button></div>
+        <div class="panel-header"><div><h2>menu margin spotlight</h2><p>top performers vs. trending down</p></div><button class="link-btn" data-link-view="menu" data-view="menu">view full menu margin -></button></div>
         ${menuSpotlight(menuRows)}
       </article>
     </div>
@@ -372,7 +396,7 @@ function renderMenu() {
         <option value="refundDesc" ${state.menuSort === "refundDesc" ? "selected" : ""}>refund-heavy first</option>
       </select>
     </div>
-    <div class="dashboard-grid">
+    <div class="dashboard-grid menu-page-grid">
       <article class="panel span-5"><div class="panel-header"><div><h2>margin by item</h2><p>Net contribution before store labor</p></div></div><div id="menu-bars" class="chart-host"></div></article>
       <article class="panel span-7"><div class="panel-header"><div><h2>item economics</h2><p>Price, COGS, packaging, fees, and recommendations.</p></div></div>${menuPanel}</article>
     </div>
@@ -400,6 +424,7 @@ function renderActions() {
   return `
     <div class="section-heading"><div><h1>operator action queue</h1><p>Modeled evidence actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions")}</div>
     <div class="dashboard-grid">
+      <article class="panel span-12 action-summary-panel">${actionStats(actions)}</article>
       <article class="panel span-12">${actionsPanel}</article>
     </div>
   `;
@@ -415,6 +440,7 @@ function renderSummary() {
   return `
     <div class="section-heading"><div><h1>weekly finance summary</h1><p>A send-ready internal summary for finance, operations, and market leaders.</p></div><div class="section-actions"><button class="utility-btn" data-action="copy-summary">${icon("copy")} copy summary</button><button class="primary-btn" data-action="download-summary">${icon("download")} Excel report</button></div></div>
     <div class="dashboard-grid">
+      <article class="panel span-12 summary-meta-panel">${summaryMetaStrip(summary)}</article>
       <article class="panel span-8 summary-document">${summaryDocument(summary)}</article>
       <article class="panel span-4">${forecastUpdate(summary)}</article>
     </div>
@@ -422,7 +448,18 @@ function renderSummary() {
 }
 
 function renderUpload() {
-  const validation = validateUpload(state.uploadKind, state.uploadRows);
+  const validation = state.uploadRows.length
+    ? validateUpload(state.uploadKind, state.uploadRows)
+    : {
+        ok: false,
+        missing: [],
+        invalid: state.uploadMeta.attempted ? ["No data rows found after the header row. Add at least one data row before mapping."] : [],
+        rowCount: 0
+      };
+  const hasUploadAttempt = state.uploadMeta.attempted;
+  const validationSubtitle = hasUploadAttempt
+    ? `${state.uploadMeta.rowCount} rows parsed${state.uploadMeta.fileName ? ` from ${state.uploadMeta.fileName}` : ""}`
+    : "No file uploaded yet";
   return `
     <div class="section-heading"><div><h1>data upload</h1><p>Validate CSV exports before connecting real POS, marketplace, labor, and forecast files.</p></div><button class="primary-btn" data-action="download-samples">${icon("download")} sample workbook</button></div>
     <div class="dashboard-grid">
@@ -443,12 +480,13 @@ function renderUpload() {
           <span>Orders, menu COGS, labor, or forecast exports</span>
           <input type="file" accept=".csv,text/csv" data-upload-file />
         </label>
+        ${uploadGuide(state.uploadKind)}
       </article>
       <article class="panel span-7">
-        <div class="panel-header"><div><h2>validation result</h2><p>${state.uploadRows.length ? `${state.uploadRows.length} rows parsed` : "No file uploaded yet"}</p></div></div>
-        ${state.uploadRows.length ? `
+        <div class="panel-header"><div><h2>validation result</h2><p>${validationSubtitle}</p></div></div>
+        ${hasUploadAttempt ? `
           <div class="validation ${validation.ok ? "ok" : "bad"}">${validation.ok ? "Schema ready for mapping." : validationMessage(validation)}</div>
-          ${previewTable(state.uploadRows.slice(0, 8))}
+          ${state.uploadRows.length ? previewTable(state.uploadRows.slice(0, 8)) : uploadNoRowsState()}
         ` : emptyState("Upload a CSV to verify headers, row count, and sample values before mapping.")}
       </article>
     </div>
@@ -456,18 +494,37 @@ function renderUpload() {
 }
 
 function renderDictionary() {
-  const formulas = [
-    ["Net sales", "Gross menu sales minus discounts, merchant-funded promos, and merchant-funded refunds."],
-    ["Contribution margin", "Net sales minus platform fees, payment fees, food COGS, packaging, and labor."],
-    ["Direct-order mix", "Direct-order net sales divided by total net sales."],
-    ["Refund leakage", "Merchant-funded refunds divided by gross menu sales."],
-    ["Variance bridge", "Change in CM% decomposed into channel mix, fee rate, refunds, COGS, labor, and residual drivers."],
-    ["Scenario CM%", "Forecast margin adjusted for direct mix lift, food inflation, volume growth, labor efficiency, and refund improvement."]
+  const groups = [
+    {
+      title: "finance",
+      rows: [
+        ["Net sales", "Gross menu sales minus discounts, merchant-funded promos, and merchant-funded refunds."],
+        ["Contribution margin", "Net sales minus platform fees, payment fees, food COGS, packaging, and labor."],
+        ["Refund leakage", "Merchant-funded refunds divided by gross menu sales."],
+        ["Effective fee rate", "Marketplace and payment fees divided by net sales."]
+      ]
+    },
+    {
+      title: "forecast",
+      rows: [
+        ["Rolling forecast", "Weekly revenue, order, COGS, labor, and margin targets over the selected horizon."],
+        ["Scenario CM%", "Forecast margin adjusted for direct mix lift, food inflation, volume growth, labor efficiency, and refund improvement."],
+        ["Upside", "Scenario CM% minus base CM% for the active forecast horizon."]
+      ]
+    },
+    {
+      title: "operations",
+      rows: [
+        ["Direct-order mix", "Direct-order net sales divided by total net sales."],
+        ["Variance bridge", "Change in CM% decomposed into channel mix, fee rate, refunds, COGS, labor, and residual drivers."],
+        ["Operator action", "A location-specific recommendation with owner, due date, evidence, and modeled margin impact."]
+      ]
+    }
   ];
   return `
     <div class="section-heading"><div><h1>data dictionary</h1><p>Finance definitions are visible so operators can trust the recommendations.</p></div></div>
     <div class="dashboard-grid">
-      <article class="panel span-12">${simpleDefinitionTable(formulas)}</article>
+      <article class="panel span-12">${definitionGroups(groups)}</article>
     </div>
   `;
 }
@@ -516,7 +573,7 @@ function channelLegend(rows) {
               <span class="legend-pct">${formatters.percent(row.pct)}</span>
               <span class="legend-divider" aria-hidden="true">·</span>
               <span class="legend-amount">${formatters.currency(row.value, true)}</span>
-              <span class="legend-divider" aria-hidden="true">·</span>
+              <span class="legend-divider legend-order-divider" aria-hidden="true">·</span>
               <span class="legend-order">${formatters.number(row.orders)} orders</span>
             </div>
           </div>
@@ -562,7 +619,7 @@ function attentionList(rows, hasCurrentActivity = true) {
   return `
     <div class="attention-list">
       ${rows.map((row) => `
-        <div class="attention-row">
+        <div class="attention-row" title="${escapeHtml(`${row.name}: ${row.topDriver?.driver || "stable operating mix"}`)}">
           <div class="attention-main">
             <strong>${row.name}</strong>
             <span class="attention-meta"><span>${row.district}</span> <span>·</span> <span>${row.manager}</span></span>
@@ -603,7 +660,7 @@ function compactActionList(actions) {
   return `
     <div class="compact-actions">
       ${actions.map((action) => `
-        <div class="compact-action">
+        <div class="compact-action" title="${escapeHtml(`${action.issue}: ${action.evidence}`)}">
           <div><strong>${action.issue}</strong><span>${locationById[action.locationId]?.district || ""} · ${action.owner}</span></div>
           <span class="priority ${action.priority}">${action.priority}</span>
           <em class="good">+${action.estimatedImpactPts.toFixed(1)} pts</em>
@@ -616,17 +673,21 @@ function compactActionList(actions) {
 
 function menuTable(rows) {
   return `
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>item</th><th>brand</th><th>price</th><th>COGS</th><th>packaging</th><th>unit CM</th><th>CM %</th><th>refund</th><th>volume rank</th><th>recommendation</th></tr></thead>
+    <div class="table-wrap menu-table-wrap"><table class="data-table menu-table">
+      <thead><tr><th>item</th><th>brand</th><th>economics</th><th>CM %</th><th>refund</th><th>rank</th><th>recommendation</th></tr></thead>
       <tbody>
         ${rows.map((row) => `
           <tr>
             <td><strong>${row.name}</strong><span>${row.category}</span></td>
             <td>${row.brandName}</td>
-            <td>${formatters.currency(row.price)}</td>
-            <td>${formatters.currency(row.foodCost)}</td>
-            <td>${formatters.currency(row.packaging)}</td>
-            <td>${formatters.currency(row.unitContribution)}</td>
+            <td>
+              <div class="economics-cell">
+                <span><b>Price</b> ${formatters.currency(row.price)}</span>
+                <span><b>COGS</b> ${formatters.currency(row.foodCost)}</span>
+                <span><b>Pack</b> ${formatters.currency(row.packaging)}</span>
+                <span><b>Unit CM</b> ${formatters.currency(row.unitContribution)}</span>
+              </div>
+            </td>
             <td class="${row.marginPct < 0.34 ? "bad" : row.marginPct > 0.52 ? "good" : ""}">${formatters.percent(row.marginPct)}</td>
             <td class="${row.summary.refundRate > 0.035 ? "bad" : ""}">${formatters.percent(row.summary.refundRate)}</td>
             <td>#${row.volumeRank}</td>
@@ -635,6 +696,64 @@ function menuTable(rows) {
         `).join("")}
       </tbody>
     </table></div>
+  `;
+}
+
+function actionStats(actions) {
+  const open = actions.filter((action) => action.status !== "done").length;
+  const high = actions.filter((action) => action.priority === "high").length;
+  const inProgress = actions.filter((action) => action.status === "in progress").length;
+  const done = actions.filter((action) => action.status === "done").length;
+  const impact = actions.reduce((total, action) => total + (action.status === "done" ? 0 : action.estimatedImpactPts), 0);
+  return `
+    <div class="action-stats">
+      ${statChip("open actions", formatters.number(open), "medium")}
+      ${statChip("high priority", formatters.number(high), high ? "danger" : "neutral")}
+      ${statChip("in progress", formatters.number(inProgress), "neutral")}
+      ${statChip("completed", formatters.number(done), "good")}
+      ${statChip("modeled upside", `+${impact.toFixed(1)} pts`, "good")}
+    </div>
+  `;
+}
+
+function summaryMetaStrip(summary) {
+  const filtered = filterData(sampleData, state.filters);
+  const current = summarize(filtered.orders, filtered.labor);
+  const actions = currentActions();
+  return `
+    <div class="summary-meta-strip">
+      ${statChip("period", summary.period, "neutral")}
+      ${statChip("net sales", formatters.currency(current.netSales, true), "neutral")}
+      ${statChip("CM %", formatters.percent(current.marginPct), current.marginPct >= 0.2 ? "good" : "medium")}
+      ${statChip("open actions", formatters.number(actions.filter((action) => action.status !== "done").length), "medium")}
+      ${statChip("forecast upside", formatters.points(summary.forecast.upside), summary.forecast.upside >= 0 ? "good" : "danger")}
+    </div>
+  `;
+}
+
+function statChip(label, value, tone = "neutral") {
+  return `<div class="stat-chip ${tone}"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function uploadGuide(kind) {
+  const guides = {
+    orders: ["date", "location", "brand", "channel", "item", "quantity", "gross_sales"],
+    labor: ["date", "location", "actual_hours", "hourly_rate"],
+    forecast: ["week", "location", "revenue_forecast", "orders_forecast", "margin_forecast"],
+    menu: ["brand", "item", "price", "food_cost", "packaging_cost"]
+  };
+  const labels = {
+    orders: "order line export",
+    labor: "daily labor export",
+    forecast: "weekly forecast export",
+    menu: "menu COGS export"
+  };
+  return `
+    <div class="upload-guide">
+      <strong>${labels[kind] || "CSV export"} required fields</strong>
+      <div>${(guides[kind] || []).map((field) => `<span>${field}</span>`).join("")}</div>
+      <p>Download the sample workbook for formatted templates and example values before mapping a real export.</p>
+    </div>
   `;
 }
 
@@ -766,7 +885,15 @@ function scenarioControls(series) {
     ["refundReduction", "refund rate improvement", "pts", 0, 2]
   ];
   return `
-    <div class="panel-header"><div><h2>scenario controls</h2><p>Model practical operating levers.</p></div></div>
+    <div class="panel-header">
+      <div><h2>scenario controls</h2><p>Model practical operating levers.</p></div>
+      <select class="mini-select" data-scenario-preset>
+        <option value="custom" ${state.scenarioPreset === "custom" ? "selected" : ""}>scenario</option>
+        <option value="base" ${state.scenarioPreset === "base" ? "selected" : ""}>base</option>
+        <option value="direct" ${state.scenarioPreset === "direct" ? "selected" : ""}>+direct mix</option>
+        <option value="cost" ${state.scenarioPreset === "cost" ? "selected" : ""}>cost pressure</option>
+      </select>
+    </div>
     <div class="scenario-list">
       ${controls.map(([key, label, unit, min, max]) => `
         <label><span>${label}<em>${state.scenario[key]}${unit}</em></span><input type="range" min="${min}" max="${max}" step="0.1" value="${state.scenario[key]}" data-scenario="${key}" /></label>
@@ -791,7 +918,7 @@ function forecastCard(series) {
       <span>week ${series.length} forecast</span>
       <dl><dt>base scenario</dt><dd>${formatters.percent(last.baseMarginPct)}</dd><dt>scenario</dt><dd class="good">${formatters.percent(last.scenarioMarginPct)}</dd></dl>
       <strong class="good">↑ ${formatters.points(last.scenarioMarginPct - last.baseMarginPct)}</strong>
-      <button class="link-btn" data-view="forecast">view scenarios</button>
+      <button class="link-btn" data-link-view="forecast" data-view="forecast">view scenarios</button>
     </div>
   `;
 }
@@ -805,8 +932,31 @@ function simpleDefinitionTable(rows) {
   return `<div class="table-wrap"><table class="data-table"><thead><tr><th>metric</th><th>definition</th></tr></thead><tbody>${rows.map(([metric, definition]) => `<tr><td><strong>${metric}</strong></td><td>${definition}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
+function definitionGroups(groups) {
+  return `
+    <div class="dictionary-grid">
+      ${groups.map((group) => `
+        <section class="definition-group">
+          <h2>${group.title}</h2>
+          ${simpleDefinitionTable(group.rows)}
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
 function emptyState(text) {
   return `<div class="empty-state">${icon("upload")}<strong>No data loaded</strong><span>${text}</span></div>`;
+}
+
+function uploadNoRowsState() {
+  return `
+    <div class="empty-state upload-empty">
+      ${icon("info")}
+      <strong>CSV header detected</strong>
+      <span>Add at least one data row beneath the headers, then upload again to validate sample values.</span>
+    </div>
+  `;
 }
 
 function selectControl(label, key, value, options) {
@@ -828,6 +978,7 @@ function bindShellEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
+      state.moreOpen = false;
       render();
     });
   });
@@ -854,17 +1005,34 @@ function bindShellEvents() {
       state.scenarioPreset = "custom";
       render();
     });
+    input.addEventListener("keydown", (event) => {
+      const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
+      if (!direction && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      const min = Number(input.min);
+      const max = Number(input.max);
+      const step = Number(input.step) || 1;
+      const current = Number(input.value);
+      const next = event.key === "Home" ? min : event.key === "End" ? max : current + direction * step;
+      state.scenario[input.dataset.scenario] = Number(Math.min(max, Math.max(min, next)).toFixed(2));
+      state.scenarioPreset = "custom";
+      render();
+    });
   });
   const preset = document.querySelector("[data-scenario-preset]");
   if (preset) preset.addEventListener("change", () => applyPreset(preset.value));
   const menuSort = document.querySelector("[data-menu-sort]");
   if (menuSort) menuSort.addEventListener("change", () => {
     state.menuSort = menuSort.value;
+    notify(`Menu sorted by ${menuSort.selectedOptions[0]?.textContent || "selected option"}.`);
     render();
   });
   const uploadKind = document.querySelector("[data-upload-kind]");
   if (uploadKind) uploadKind.addEventListener("change", () => {
     state.uploadKind = uploadKind.value;
+    state.uploadRows = [];
+    state.uploadMeta = { attempted: false, fileName: "", rowCount: 0 };
+    notify(`Upload schema set to ${uploadKind.selectedOptions[0]?.textContent || uploadKind.value}.`);
     render();
   });
   const uploadFile = document.querySelector("[data-upload-file]");
@@ -885,8 +1053,8 @@ function renderCharts() {
     ["waterfall", (node) => renderWaterfall(node, bridge)],
     ["pnl-waterfall", (node) => renderWaterfall(node, bridge)],
     ["donut", (node) => renderDonut(node, mix)],
-    ["forecast-chart", (node) => renderForecast(node, forecast)],
-    ["forecast-detail-chart", (node) => renderForecast(node, forecast)],
+    ["forecast-chart", (node) => renderForecast(node, forecast, { labelMode: "compact" })],
+    ["forecast-detail-chart", (node) => renderForecast(node, forecast, { labelMode: "full" })],
     ["menu-bars", (node) => renderBarTrend(node, menuRows, (row) => row.marginPct, (row) => row.name)]
   ];
   charts.forEach(([id, renderer]) => {
@@ -907,6 +1075,7 @@ function renderCharts() {
 }
 
 function updateFilter(key, value) {
+  state.moreOpen = false;
   if (key === "range") {
     state.filters.range = rangeForKey(value);
   } else if (key === "forecastWeeks") {
@@ -946,25 +1115,57 @@ function handleAction(action) {
   const forecast = forecastSeries(sampleData, state.filters, state.scenario, {
     forecastWeeks: state.forecastWeeks
   });
+  if (action !== "more") state.moreOpen = false;
   if (action === "reset") {
     state.filters = { range: rangeForKey("current"), market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
     state.forecastWeeks = 104;
+    state.moreOpen = false;
     notify("Filters reset.");
     render();
   }
-  if (action === "save") notify("Saved view locally for this demo session.");
-  if (action === "more") notify("More options: export, copy summary, and sample uploads are available in their views.");
+  if (action === "save") saveCurrentView();
+  if (action === "more") {
+    state.moreOpen = !state.moreOpen;
+    render();
+  }
   if (action === "copy-summary") copySummary(summary, notify);
-  if (action === "download-summary") downloadSummary(summary);
+  if (action === "download-summary") {
+    downloadSummary(summary);
+    notify("Weekly finance Excel report downloaded.");
+  }
   if (action === "download-samples") downloadSamples();
-  if (action === "export-location-performance.xls") exportWorkbook("salted-location-performance.xls", workbookConfig("location", locations.map(locationExportRow), summary));
-  if (action === "export-menu-margin.xls") exportWorkbook("salted-menu-margin.xls", workbookConfig("menu", menuRows.map(menuExportRow), summary));
-  if (action === "export-rolling-forecast.xls") exportWorkbook("salted-rolling-forecast.xls", workbookConfig("forecast", forecast.map(forecastExportRow), summary));
-  if (action === "export-operator-actions.xls") exportWorkbook("salted-operator-actions.xls", workbookConfig("actions", buildActionCsv(currentActions()), summary));
-  if (action === "export-location-performance.csv") exportRows("location-performance.csv", locations.map(locationExportRow));
-  if (action === "export-menu-margin.csv") exportRows("menu-margin.csv", menuRows.map(menuExportRow));
-  if (action === "export-rolling-forecast.csv") exportRows("rolling-forecast.csv", forecast.map(forecastExportRow));
-  if (action === "export-operator-actions.csv") exportRows("operator-actions.csv", buildActionCsv(currentActions()));
+  if (action === "export-location-performance.xls") {
+    exportWorkbook("salted-location-performance.xls", workbookConfig("location", locations.map(locationExportRow), summary));
+    notify("Location P&L Excel export downloaded.");
+  }
+  if (action === "export-menu-margin.xls") {
+    exportWorkbook("salted-menu-margin.xls", workbookConfig("menu", menuRows.map(menuExportRow), summary));
+    notify("Menu margin Excel export downloaded.");
+  }
+  if (action === "export-rolling-forecast.xls") {
+    exportWorkbook("salted-rolling-forecast.xls", workbookConfig("forecast", forecast.map(forecastExportRow), summary));
+    notify("Rolling forecast Excel export downloaded.");
+  }
+  if (action === "export-operator-actions.xls") {
+    exportWorkbook("salted-operator-actions.xls", workbookConfig("actions", buildActionCsv(currentActions()), summary));
+    notify("Operator actions Excel export downloaded.");
+  }
+  if (action === "export-location-performance.csv") {
+    exportRows("location-performance.csv", locations.map(locationExportRow));
+    notify("Location P&L CSV export downloaded.");
+  }
+  if (action === "export-menu-margin.csv") {
+    exportRows("menu-margin.csv", menuRows.map(menuExportRow));
+    notify("Menu margin CSV export downloaded.");
+  }
+  if (action === "export-rolling-forecast.csv") {
+    exportRows("rolling-forecast.csv", forecast.map(forecastExportRow));
+    notify("Rolling forecast CSV export downloaded.");
+  }
+  if (action === "export-operator-actions.csv") {
+    exportRows("operator-actions.csv", buildActionCsv(currentActions()));
+    notify("Operator actions CSV export downloaded.");
+  }
 }
 
 function exportButton(baseName) {
@@ -1056,6 +1257,7 @@ function applyPreset(value) {
   if (value === "base") state.scenario = { directMixLift: 0, foodInflation: 0, volumeGrowth: 0, laborEfficiency: 0, refundReduction: 0 };
   if (value === "direct") state.scenario = { directMixLift: 6, foodInflation: 0, volumeGrowth: 2, laborEfficiency: 1, refundReduction: 0.7 };
   if (value === "cost") state.scenario = { directMixLift: 2, foodInflation: 4, volumeGrowth: 1, laborEfficiency: 0.5, refundReduction: 0.2 };
+  notify(`Scenario preset applied: ${value}.`);
   render();
 }
 
@@ -1065,7 +1267,8 @@ async function handleUpload(event) {
   state.uploadKind = detectUploadKind(file.name, state.uploadKind);
   const text = await file.text();
   state.uploadRows = parseCsv(text);
-  notify(`${state.uploadRows.length} CSV rows parsed.`);
+  state.uploadMeta = { attempted: true, fileName: file.name, rowCount: state.uploadRows.length };
+  notify(state.uploadRows.length ? `${state.uploadRows.length} CSV rows parsed.` : "CSV parsed, but no data rows were found.");
   render();
 }
 
@@ -1209,7 +1412,56 @@ function downloadSamples() {
   notify("Styled sample workbook downloaded.");
 }
 
+function saveCurrentView() {
+  const name = savedViewName();
+  const entry = {
+    name,
+    type: "custom",
+    view: state.view,
+    filters: JSON.parse(JSON.stringify(state.filters)),
+    forecastWeeks: state.forecastWeeks,
+    scenario: JSON.parse(JSON.stringify(state.scenario)),
+    scenarioPreset: state.scenarioPreset,
+    menuSort: state.menuSort,
+    savedAt: new Date().toISOString()
+  };
+  const existingIndex = customSavedViews.findIndex((view) => view.name === name);
+  if (existingIndex >= 0) {
+    customSavedViews.splice(existingIndex, 1, entry);
+  } else {
+    customSavedViews.unshift(entry);
+  }
+  customSavedViews.splice(6);
+  localStorage.setItem("salted-saved-views", JSON.stringify(customSavedViews));
+  notify(`Saved view: ${name}.`);
+}
+
+function savedViewName() {
+  const viewLabel = nav.find((item) => item.id === state.view)?.label || state.view;
+  const filters = [
+    state.filters.locationId !== "all" ? locationById[state.filters.locationId]?.name : "",
+    state.filters.district !== "all" ? state.filters.district : "",
+    state.filters.market !== "all" ? state.filters.market : "",
+    state.filters.brandId !== "all" ? brandById[state.filters.brandId]?.name : "",
+    state.filters.channelId !== "all" ? channelById[state.filters.channelId]?.name : ""
+  ].filter(Boolean);
+  const scope = filters[0] || periodLabel();
+  return `${viewLabel} - ${scope}`;
+}
+
 function applySavedView(name) {
+  const customView = customSavedViews.find((view) => view.name === name);
+  if (customView) {
+    state.view = customView.view;
+    state.filters = JSON.parse(JSON.stringify(customView.filters));
+    state.forecastWeeks = customView.forecastWeeks;
+    state.scenario = JSON.parse(JSON.stringify(customView.scenario));
+    state.scenarioPreset = customView.scenarioPreset;
+    state.menuSort = customView.menuSort;
+    state.moreOpen = false;
+    notify(`Loaded saved view: ${name}.`);
+    return;
+  }
   if (name === "VP finance - weekly") {
     state.view = "summary";
     state.filters = { ...state.filters, market: "all", district: "all", locationId: "all", brandId: "all", channelId: "all" };
@@ -1226,8 +1478,8 @@ function applySavedView(name) {
     state.view = "menu";
     state.menuSort = "marginAsc";
   }
+  state.moreOpen = false;
   notify(`Loaded saved view: ${name}.`);
-  render();
 }
 
 function validationMessage(validation) {
