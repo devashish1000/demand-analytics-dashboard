@@ -142,12 +142,23 @@ export function renderDonut(container, rows) {
   const node = svg(width, height, "chart donut-chart");
   let startAngle = -90;
 
-  rows.forEach((row) => {
-    const endAngle = startAngle + row.pct * 360;
-    const path = donutSegment(cx, cy, radius, thickness, startAngle, endAngle);
-    node.appendChild(el("path", { d: path, fill: row.color, stroke: "#fff", "stroke-width": "2" }));
-    startAngle = endAngle;
-  });
+  if (rows.length === 1 && rows[0].pct >= 0.999) {
+    node.appendChild(el("circle", {
+      cx,
+      cy,
+      r: radius - thickness / 2,
+      fill: "none",
+      stroke: rows[0].color,
+      "stroke-width": thickness
+    }));
+  } else {
+    rows.forEach((row) => {
+      const endAngle = startAngle + row.pct * 360;
+      const path = donutSegment(cx, cy, radius, thickness, startAngle, endAngle);
+      node.appendChild(el("path", { d: path, fill: row.color, stroke: "#fff", "stroke-width": "2" }));
+      startAngle = endAngle;
+    });
+  }
 
   node.appendChild(el("text", { x: cx, y: cy - 4, class: "donut-center", "text-anchor": "middle" }, formatters.currency(rows.reduce((sum, row) => sum + row.value, 0), true)));
   node.appendChild(el("text", { x: cx, y: cy + 18, class: "axis-label donut-subtitle", "text-anchor": "middle" }, "net sales"));

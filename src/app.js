@@ -160,6 +160,8 @@ function renderOverview() {
   const summary = weeklySummary({ ...sampleData, actions }, state.filters, state.scenario);
   const forecast = forecastSeries(sampleData, state.filters, state.scenario);
   const menuRows = menuPerformance(sampleData, state.filters);
+  const mixRows = channelMix(comparison.current.orders);
+  const attentionRows = locations.filter((location) => location.risk !== "low");
 
   return `
     <div class="metric-row">
@@ -188,17 +190,13 @@ function renderOverview() {
         <div class="panel-header"><div><h2>sales mix by channel</h2><p>% of net sales</p></div></div>
         <div class="donut-layout">
           <div id="donut" class="chart-host"></div>
-          <div class="legend-list">
-            ${channelMix(comparison.current.orders).map((row) => `
-              <div class="legend-row"><span style="background:${row.color}"></span><strong>${row.label}</strong><em>${formatters.percent(row.pct)} · ${formatters.currency(row.value, true)}</em></div>
-            `).join("")}
-          </div>
+          ${channelLegend(mixRows)}
         </div>
         <div class="note-line">${icon("search")} Direct-order mix ${currentSummary.directOrderMix > previousSummary.directOrderMix ? "improved" : "declined"} ${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)} vs prior 7 days.</div>
       </article>
       <article class="panel span-3">
-        <div class="panel-header"><div><h2>locations needing attention <span class="badge danger">${locations.filter((l) => l.risk !== "low").length}</span></h2></div><button class="link-btn" data-view="pnl">view all</button></div>
-        ${attentionList(locations.slice(0, 6))}
+        <div class="panel-header"><div><h2>locations needing attention <span class="badge danger">${attentionRows.length}</span></h2></div><button class="link-btn" data-view="pnl">view all</button></div>
+        ${attentionList(attentionRows.slice(0, 4))}
       </article>
       <article class="panel span-5">
         <div class="panel-header">
@@ -359,6 +357,32 @@ function metricCard(label, current, previous, type, tone, inverse = false) {
   `;
 }
 
+function channelLegend(rows) {
+  if (!rows.length) {
+    return `<div class="legend-empty">No channel sales in the selected filter.</div>`;
+  }
+  return `
+    <div class="legend-list">
+      ${rows.map((row) => `
+        <div class="legend-row">
+          <span class="legend-dot" style="background:${row.color}" aria-hidden="true"></span>
+          <div class="legend-copy">
+            <div class="legend-title">
+              <strong>${row.label}</strong>
+              <small>${formatters.number(row.orders)} orders</small>
+            </div>
+            <div class="legend-values">
+              <em>${formatters.percent(row.pct)}</em>
+              <span class="legend-divider">·</span>
+              <span>${formatters.currency(row.value, true)}</span>
+            </div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function locationTable(rows, compact) {
   return `
     <div class="table-wrap"><table class="data-table">
@@ -380,17 +404,28 @@ function locationTable(rows, compact) {
 }
 
 function attentionList(rows) {
+  if (!rows.length) {
+    return `
+      <div class="attention-list">
+        <div class="attention-empty">
+          <strong>No locations above watch threshold.</strong>
+          <span>Current filters are inside normal margin and refund bands.</span>
+        </div>
+      </div>
+    `;
+  }
   return `
     <div class="attention-list">
       ${rows.map((row) => `
         <div class="attention-row">
-          <div>
+          <div class="attention-main">
             <strong>${row.name}</strong>
             <span>${row.district} · ${row.manager}</span>
+            <small>${row.topDriver?.driver || "stable operating mix"}</small>
           </div>
           <div class="attention-metrics">
-            <span>${formatters.percent(row.summary.marginPct)}</span>
-            <em class="${row.delta >= 0 ? "good" : "bad"}">${formatters.points(row.delta)}</em>
+            <div class="attention-kpi"><span>CM</span><strong>${formatters.percent(row.summary.marginPct)}</strong></div>
+            <div class="attention-kpi"><span>vs prior</span><em class="${row.delta >= 0 ? "good" : "bad"}">${formatters.points(row.delta)}</em></div>
             <i class="status ${row.risk}">${row.risk}</i>
           </div>
         </div>
@@ -475,8 +510,36 @@ function summaryPanel(summary) {
       <div><h2>weekly finance summary</h2><p>${summary.period}</p></div>
       <div class="button-row"><button class="utility-btn icon-only" data-action="copy-summary" title="Copy">${icon("copy")}</button><button class="primary-btn" data-action="download-summary">Excel report</button></div>
     </div>
-    ${summaryDocument(summary, true)}
-    ${forecastUpdate(summary)}
+    ${summaryDigest(summary)}
+    ${summaryForecastStrip(summary)}
+  `;
+}
+
+function summaryDigest(summary) {
+  const rows = [
+    ["what changed", summary.changed[0], "good"],
+    ["why it changed", summary.why[0], "info"],
+    ["what to do next", summary.next[0], "warn"]
+  ];
+  return `
+    <div class="summary-digest">
+      ${rows.map(([title, line, tone]) => `
+        <section>
+          <h3><span class="dot ${tone}"></span>${title}</h3>
+          <p>${line}</p>
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function summaryForecastStrip(summary) {
+  return `
+    <div class="forecast-strip">
+      <div><span>base</span><strong>${formatters.percent(summary.forecast.base)}</strong></div>
+      <div><span>scenario</span><strong class="good">${formatters.percent(summary.forecast.scenario)}</strong></div>
+      <div><span>upside</span><strong class="good">${formatters.points(summary.forecast.upside)}</strong></div>
+    </div>
   `;
 }
 
