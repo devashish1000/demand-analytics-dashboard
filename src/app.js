@@ -58,11 +58,13 @@ const brandById = Object.fromEntries(BRANDS.map((brand) => [brand.id, brand]));
 const channelById = Object.fromEntries(CHANNELS.map((channel) => [channel.id, channel]));
 
 function currentActions() {
-  return sampleData.actions.map((action) => ({
-    ...action,
-    status: storedActions[action.id] || action.status,
-    locationName: locationById[action.locationId]?.name || action.locationId
-  }));
+  return sampleData.actions
+    .filter((action) => locationMatchesFilters(locationById[action.locationId], state.filters))
+    .map((action) => ({
+      ...action,
+      status: storedActions[action.id] || action.status,
+      locationName: locationById[action.locationId]?.name || action.locationId
+    }));
 }
 
 function render() {
@@ -87,10 +89,10 @@ function render() {
         `).join("")}
       </div>
       <div class="profile-block">
-        <div class="avatar">DN</div>
+        <div class="avatar">FO</div>
         <div>
-          <strong>dev neupane</strong>
-          <span>business analyst</span>
+          <strong>finance ops</strong>
+          <span>analyst workspace</span>
         </div>
         ${icon("chevron")}
       </div>
@@ -98,7 +100,7 @@ function render() {
     <main class="main">
       ${renderTopbar()}
       <section class="disclosure">
-        Sample modeled operating data for a Salted application prototype; not actual Salted data.
+        Sample modeled operating data; not actual Salted data. Built to connect POS, marketplace, labor, COGS, and forecast exports.
       </section>
       <section id="view-root" class="view-root">${renderView()}</section>
     </main>
@@ -115,7 +117,7 @@ function renderTopbar() {
         ${selectControl("date range", "range", rangeKey(), [
           ["current", "May 5 - May 11, 2026"],
           ["prior", "Apr 28 - May 4, 2026"],
-          ["all", "Last 28 days"]
+          ["all", "Last 14 days"]
         ])}
         ${selectControl("market", "market", state.filters.market, [["all", "all"], ...uniqueOptions(LOCATIONS, "market")])}
         ${selectControl("district", "district", state.filters.district, [["all", "all"], ...uniqueOptions(LOCATIONS, "district")])}
@@ -195,7 +197,7 @@ function renderOverview() {
       </article>
       <article class="panel span-3">
         <div class="panel-header"><div><h2>locations needing attention <span class="badge danger">${locations.filter((l) => l.risk !== "low").length}</span></h2></div><button class="link-btn" data-view="pnl">view all</button></div>
-        ${locationTable(locations.slice(0, 7), true)}
+        ${attentionList(locations.slice(0, 6))}
       </article>
       <article class="panel span-5">
         <div class="panel-header">
@@ -262,7 +264,7 @@ function renderForecastView() {
   return `
     <div class="section-heading"><div><h1>rolling forecast</h1><p>13-week forecast with scenario controls for direct mix, food cost, volume, labor, and refund improvement.</p></div>${exportButton("rolling-forecast.csv")}</div>
     <div class="dashboard-grid">
-      <article class="panel span-8"><div class="panel-header"><div><h2>base vs scenario CM%</h2><p>Includes confidence bands in the data model.</p></div></div><div id="forecast-detail-chart" class="chart-host large"></div></article>
+      <article class="panel span-8"><div class="panel-header"><div><h2>base vs scenario CM%</h2><p>Modeled trajectory from current sample operating drivers.</p></div></div><div id="forecast-detail-chart" class="chart-host large"></div></article>
       <article class="panel span-4">${scenarioControls(series)}</article>
       <article class="panel span-12">${forecastTable(series)}</article>
     </div>
@@ -272,7 +274,7 @@ function renderForecastView() {
 function renderActions() {
   const actions = currentActions();
   return `
-    <div class="section-heading"><div><h1>operator action queue</h1><p>Evidence-backed actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions.csv")}</div>
+    <div class="section-heading"><div><h1>operator action queue</h1><p>Modeled evidence actions that tie P&L movement to field execution.</p></div>${exportButton("operator-actions.csv")}</div>
     <article class="panel">${actionTable(actions, true)}</article>
   `;
 }
@@ -368,6 +370,26 @@ function locationTable(rows, compact) {
         `).join("")}
       </tbody>
     </table></div>
+  `;
+}
+
+function attentionList(rows) {
+  return `
+    <div class="attention-list">
+      ${rows.map((row) => `
+        <div class="attention-row">
+          <div>
+            <strong>${row.name}</strong>
+            <span>${row.district} · ${row.manager}</span>
+          </div>
+          <div class="attention-metrics">
+            <span>${formatters.percent(row.summary.marginPct)}</span>
+            <em class="${row.delta >= 0 ? "good" : "bad"}">${formatters.points(row.delta)}</em>
+            <i class="status ${row.risk}">${row.risk}</i>
+          </div>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -631,7 +653,7 @@ function updateFilter(key, value) {
     state.filters.range =
       value === "current" ? { start: "2026-05-05", end: "2026-05-11" } :
       value === "prior" ? { start: "2026-04-28", end: "2026-05-04" } :
-      { start: "2026-04-28", end: "2026-05-25" };
+      { start: "2026-04-28", end: "2026-05-11" };
   } else {
     state.filters[key] = value;
     if (key === "market") {
@@ -773,8 +795,21 @@ function sortMenu(rows) {
 
 function rangeKey() {
   if (state.filters.range.start === "2026-04-28" && state.filters.range.end === "2026-05-04") return "prior";
-  if (state.filters.range.start === "2026-04-28" && state.filters.range.end === "2026-05-25") return "all";
+  if (state.filters.range.start === "2026-04-28" && state.filters.range.end === "2026-05-11") return "all";
   return "current";
+}
+
+function locationMatchesFilters(location, filters) {
+  if (!location) return false;
+  return (
+    matchesFilter(filters.market, location.market) &&
+    matchesFilter(filters.district, location.district) &&
+    matchesFilter(filters.locationId, location.id)
+  );
+}
+
+function matchesFilter(filterValue, actualValue) {
+  return !filterValue || filterValue === "all" || filterValue === actualValue;
 }
 
 function statusSelect(action) {

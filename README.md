@@ -8,7 +8,7 @@ A Vercel-ready static SaaS MVP that demonstrates a finance + operations command 
 - Delivery channel economics across marketplace, direct, pickup, and catering.
 - Menu item unit economics with COGS, packaging, platform fees, and recommendations.
 - Rolling 13-week forecasts with scenario controls.
-- Evidence-backed operator action queue.
+- Modeled evidence operator action queue.
 - Send-ready weekly finance summary.
 - CSV validation and export workflows.
 

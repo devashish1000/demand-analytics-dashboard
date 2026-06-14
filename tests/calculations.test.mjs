@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createSampleData } from "../src/data.js";
 import {
   comparePeriods,
+  filterData,
   forecastSeries,
   locationPerformance,
   menuPerformance,
@@ -25,6 +26,10 @@ const filters = {
 
 assert.ok(data.orders.length > 1000, "sample orders should be dense enough for dashboards");
 assert.ok(data.labor.length > 100, "sample labor rows should exist");
+assert.ok(
+  data.orders.every((order) => order.date <= data.generatedAt.slice(0, 10)),
+  "sample actuals should not extend past the visible data-as-of timestamp"
+);
 
 const sampleOrder = data.orders[0];
 assert.equal(
@@ -52,6 +57,17 @@ assert.equal(bridge.at(-1).type, "end", "variance bridge should end with current
 const locations = locationPerformance(data, filters);
 assert.equal(locations.length, data.locations.length, "all locations should appear in performance table");
 assert.ok(locations.some((location) => location.risk !== "low"), "risk model should flag at least one attention location");
+
+const laLocations = locationPerformance(data, { ...filters, market: "Los Angeles", district: "LA1" });
+assert.ok(laLocations.length > 0, "filtered P&L should retain matching locations with activity");
+assert.ok(laLocations.every((location) => location.market === "Los Angeles" && location.district === "LA1"), "filtered P&L should not show zero-order nonmatching markets");
+
+const allFiltered = filterData(data, filters);
+const brandFiltered = filterData(data, { ...filters, brandId: "moonbowls" });
+const allLaborExpense = summarize(allFiltered.orders, allFiltered.labor).laborExpense;
+const brandLaborExpense = summarize(brandFiltered.orders, brandFiltered.labor).laborExpense;
+assert.ok(brandLaborExpense > 0, "brand-filtered P&L should include allocated labor");
+assert.ok(brandLaborExpense < allLaborExpense, "brand-filtered P&L should not absorb full kitchen labor");
 
 const menuRows = menuPerformance(data, filters);
 assert.equal(menuRows.length, data.menuItems.length, "menu table should include all menu items with activity");

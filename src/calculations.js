@@ -49,33 +49,85 @@ export function laborCost(row) {
   return row.actualHours * row.hourlyRate * (1 + row.payrollBurdenRate);
 }
 
+/*
+ * Labor rows are exported by date/location, while brand and channel filters are
+ * order-level. Allocate location labor to the filtered order set by modeled prep
+ * minutes so filtered P&Ls stay credible instead of charging one brand or channel
+ * for the entire kitchen shift.
+ */
 export function filterData(data, filters) {
-  const orders = data.orders.filter((order) => {
+  const baseOrders = data.orders.filter((order) => {
     const location = locationById[order.locationId];
     const dateOk = !filters.range || isDateInRange(order.date, filters.range);
     return (
       dateOk &&
       matches(filters.market, location.market) &&
       matches(filters.district, location.district) &&
-      matches(filters.locationId, order.locationId) &&
-      matches(filters.brandId, order.brandId) &&
-      matches(filters.channelId, order.channelId)
+      matches(filters.locationId, order.locationId)
     );
   });
 
-  const locationIds = new Set(orders.map((order) => order.locationId));
-  const labor = data.labor.filter((row) => {
+  const orders = baseOrders.filter((order) =>
+    matches(filters.brandId, order.brandId) &&
+    matches(filters.channelId, order.channelId)
+  );
+
+  const baseMinutesByKey = minutesByLaborKey(baseOrders);
+  const selectedMinutesByKey = minutesByLaborKey(orders);
+  const labor = data.labor.flatMap((row) => {
     const location = locationById[row.locationId];
-    return (
-      locationIds.has(row.locationId) &&
-      (!filters.range || isDateInRange(row.date, filters.range)) &&
+    const dateOk = !filters.range || isDateInRange(row.date, filters.range);
+    const locationOk =
+      dateOk &&
       matches(filters.market, location.market) &&
       matches(filters.district, location.district) &&
-      matches(filters.locationId, row.locationId)
-    );
+      matches(filters.locationId, row.locationId);
+    if (!locationOk) return [];
+
+    const key = laborKey(row);
+    const selectedMinutes = selectedMinutesByKey.get(key) || 0;
+    if (!selectedMinutes) return [];
+
+    const share = safeDivide(selectedMinutes, baseMinutesByKey.get(key) || selectedMinutes);
+    return [{
+      ...row,
+      scheduledHours: row.scheduledHours * share,
+      actualHours: row.actualHours * share,
+      allocatedShare: share
+    }];
   });
 
   return { ...data, orders, labor };
+}
+
+function minutesByLaborKey(orders) {
+  return orders.reduce((totals, order) => {
+    const key = laborKey(order);
+    totals.set(key, (totals.get(key) || 0) + order.laborMinutes);
+    return totals;
+  }, new Map());
+}
+
+function laborKey(row) {
+  return `${row.date}|${row.locationId}`;
+}
+
+export function actionLocationMatches(action, filters) {
+  const location = locationById[action.locationId];
+  return Boolean(
+    location &&
+      matches(filters.market, location.market) &&
+      matches(filters.district, location.district) &&
+      matches(filters.locationId, action.locationId)
+  );
+}
+
+export function matchingLocations(filters) {
+  return LOCATIONS.filter((location) =>
+    matches(filters.market, location.market) &&
+    matches(filters.district, location.district) &&
+    matches(filters.locationId, location.id)
+  );
 }
 
 function matches(filterValue, actualValue) {
@@ -198,9 +250,9 @@ export function channelMix(orders) {
 }
 
 export function locationPerformance(data, filters) {
-  return LOCATIONS.map((location) => {
+  return matchingLocations(filters).map((location) => {
     const locationFilters = { ...filters, locationId: location.id };
-    const { currentSummary, previousSummary, current } = comparePeriods(data, locationFilters);
+    const { currentSummary, previousSummary, current, previous } = comparePeriods(data, locationFilters);
     const delta = currentSummary.marginPct - previousSummary.marginPct;
     const bridge = varianceBridge(currentSummary, previousSummary).filter((item) => item.type !== "start" && item.type !== "end");
     const topDriver = bridge.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -214,9 +266,10 @@ export function locationPerformance(data, filters) {
       delta,
       topDriver,
       risk: riskScore >= 5 ? "high" : riskScore >= 2 ? "medium" : "low",
-      orders: current.orders.length
+      orders: current.orders.length,
+      previousOrders: previous.orders.length
     };
-  }).sort((a, b) => {
+  }).filter((location) => location.orders + location.previousOrders > 0).sort((a, b) => {
     const order = { high: 3, medium: 2, low: 1 };
     return order[b.risk] - order[a.risk] || a.summary.marginPct - b.summary.marginPct;
   });
@@ -313,7 +366,10 @@ export function weeklySummary(data, filters, scenario) {
     .slice(0, 3);
   const forecast = forecastSeries(data, filters, scenario);
   const week13 = forecast.at(-1);
-  const actions = data.actions.filter((action) => matches(filters.locationId, action.locationId));
+  const actions = data.actions.filter((action) => actionLocationMatches(action, filters));
+  const next = actions.length
+    ? actions.slice(0, 3).map((action) => `${action.issue} (${formatters.points(action.estimatedImpactPts / 100)} modeled impact).`)
+    : ["No operator action is scoped to the current filter; monitor variance drivers before assigning field work."];
   return {
     title: "Weekly finance summary",
     period: "May 5 - May 11, 2026",
@@ -323,11 +379,11 @@ export function weeklySummary(data, filters, scenario) {
       `Direct-order mix is ${formatters.percent(currentSummary.directOrderMix)} (${formatters.points(currentSummary.directOrderMix - previousSummary.directOrderMix)}).`
     ],
     why: drivers.map((driver) => `${driver.driver}: ${formatters.points(driver.value)} impact.`),
-    next: actions.slice(0, 3).map((action) => `${action.issue} (${formatters.points(action.estimatedImpactPts / 100)} est. impact).`),
+    next,
     risks: [
       "Platform fee increase expected in 3 weeks.",
       "Chicken and packaging cost volatility remains elevated.",
-      "Weekend labor availability is below target in LA and Austin."
+      laborRiskLine(filters)
     ],
     forecast: {
       base: week13?.baseMarginPct || 0,
@@ -335,6 +391,12 @@ export function weeklySummary(data, filters, scenario) {
       upside: (week13?.scenarioMarginPct || 0) - (week13?.baseMarginPct || 0)
     }
   };
+}
+
+function laborRiskLine(filters) {
+  if (filters.market && filters.market !== "all") return `Weekend labor availability is below target in ${filters.market}.`;
+  if (filters.district && filters.district !== "all") return `Weekend labor availability is below target in ${filters.district}.`;
+  return "Weekend labor availability is below target in LA and Austin.";
 }
 
 function deltaText(current, previous) {

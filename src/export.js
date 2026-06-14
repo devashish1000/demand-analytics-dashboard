@@ -19,7 +19,7 @@ export function buildWeeklySummaryText(summary) {
     "",
     `Forecast update: base week-13 CM% ${formatters.percent(summary.forecast.base)}; scenario ${formatters.percent(summary.forecast.scenario)} (${formatters.points(summary.forecast.upside)} upside).`,
     "",
-    "Disclosure: Sample modeled operating data for a Salted application prototype; not actual Salted data."
+    "Disclosure: Sample modeled operating data; not actual Salted data."
   ].join("\n");
 }
 

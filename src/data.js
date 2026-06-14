@@ -170,7 +170,7 @@ export function createSampleData() {
   const orders = [];
   const labor = [];
 
-  for (let day = 0; day < 28; day += 1) {
+  for (let day = 0; day < 14; day += 1) {
     for (const location of LOCATIONS) {
       const dailyTarget = Math.max(18, Math.round(locationDailyBase(location, day) + random() * 12));
       const laborBase = dailyTarget * (location.capacity === "high" ? 0.14 : 0.17);
@@ -273,10 +273,11 @@ export function createForecast(orders, labor) {
     const currentOrders = locationOrders.length;
     const currentCogs = locationOrders.reduce((sum, order) => sum + order.foodCost, 0);
     const currentLabor = locationLabor.reduce((sum, row) => sum + row.actualHours * row.hourlyRate * (1 + row.payrollBurdenRate), 0);
-    const weeklyRevenue = currentRevenue / 4;
-    const weeklyOrders = currentOrders / 4;
-    const weeklyCogs = currentCogs / 4;
-    const weeklyLabor = currentLabor / 4;
+    const observedWeeks = Math.max(1, new Set(locationOrders.map((order) => order.week)).size);
+    const weeklyRevenue = currentRevenue / observedWeeks;
+    const weeklyOrders = currentOrders / observedWeeks;
+    const weeklyCogs = currentCogs / observedWeeks;
+    const weeklyLabor = currentLabor / observedWeeks;
 
     return weeks.map((week) => {
       const growth = 1 + week * 0.008 + Math.sin(week + location.id.length) * 0.012;

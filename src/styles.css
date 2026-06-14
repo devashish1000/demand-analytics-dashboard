@@ -189,6 +189,7 @@ svg {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  min-width: 0;
 }
 
 .filter-control {
@@ -230,6 +231,7 @@ svg {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -303,14 +305,14 @@ svg {
 
 .metric-row {
   display: grid;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .metric-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 112px);
   gap: 10px;
   min-height: 92px;
   padding: 15px 14px;
@@ -587,6 +589,67 @@ h2 span,
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.attention-list {
+  display: grid;
+}
+
+.attention-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 66px;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0ed;
+}
+
+.attention-row:first-child {
+  padding-top: 0;
+}
+
+.attention-row:last-child {
+  border-bottom: 0;
+}
+
+.attention-row strong,
+.attention-row span,
+.attention-row em,
+.attention-row i {
+  display: block;
+}
+
+.attention-row strong {
+  color: var(--ink);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.attention-row span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.attention-metrics {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  min-width: 78px;
+  text-align: right;
+}
+
+.attention-metrics span {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.attention-metrics em,
+.attention-metrics i {
+  font-style: normal;
 }
 
 .status,
@@ -1047,6 +1110,16 @@ h2 span,
   }
 }
 
+@media (max-width: 1500px) and (min-width: 1181px) {
+  .metric-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .metric-card {
+    min-height: 86px;
+  }
+}
+
 @media (max-width: 760px) {
   .app-shell {
     display: block;
@@ -1089,11 +1162,14 @@ h2 span,
 
   .top-actions {
     flex-wrap: wrap;
+    white-space: normal;
   }
 
   .filter-control,
   .filter-control:first-child {
-    min-width: calc(50% - 6px);
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+    max-width: 100%;
   }
 
   .metric-row,
@@ -1121,5 +1197,37 @@ h2 span,
 
   .chart-host {
     min-height: 180px;
+  }
+}
+
+@media (max-width: 480px) {
+  .filters {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .filter-control,
+  .filter-control:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .top-actions {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .as-of {
+    min-width: 0;
+  }
+
+  .top-actions .utility-btn:not(.icon-only) {
+    padding-inline: 9px;
+  }
+
+  .disclosure {
+    line-height: 1.45;
   }
 }
